@@ -338,6 +338,12 @@ configure_ssh() {
     [[ -n "$cand" && -x "$cand" ]] && { SSHD_BIN="$cand"; break; }
   done
 
+  # O sshd (inclusive 'sshd -t') exige o diretório de privilege separation,
+  # que pode não existir logo após um boot. Sem ele a validação falha e a
+  # configuração seria revertida sem necessidade.
+  [[ -d /run/sshd ]] || mkdir -p /run/sshd 2>/dev/null || true
+  chmod 0755 /run/sshd 2>/dev/null || true
+
   # /bin/false precisa constar em /etc/shells para o login de túnel funcionar
   # com alguns módulos PAM (pam_shells).
   grep -qx '/bin/false' /etc/shells 2>/dev/null || echo '/bin/false' >> /etc/shells
@@ -398,13 +404,25 @@ EOF
 
   # Obs.: `cmd | grep -q` fecha o pipe cedo e, com `pipefail`, retorna 141
   # (SIGPIPE). Por isso a saída é capturada antes de ser inspecionada.
-  local effective=""
+  local effective=""""
   [[ -n "$SSHD_BIN" ]] && effective="$("$SSHD_BIN" -T 2>/dev/null || true)"
+
   if [[ "$effective" == *"passwordauthentication yes"* ]]; then
     ok "Autenticação por senha ativa — as contas do painel vão conectar."
+  elif [[ "$effective" == *"passwordauthentication no"* ]]; then
+    warn "PasswordAuthentication continua desativado."
+    warn "As contas do painel não conseguirão conectar até isso ser corrigido."
+    warn "Verifique se o provedor força a opção em outro arquivo de configuração."
   else
-    warn "Não foi possível confirmar PasswordAuthentication."
-    warn "Verifique com: ${SSHD_BIN:-sshd} -T | grep -i passwordauth"
+    # sshd -T não pôde ser executado; confere pelo arquivo que acabamos de criar.
+    if grep -qi '^\s*PasswordAuthentication\s\+yes' "$dropin" 2>/dev/null \
+       || grep -qi '^\s*PasswordAuthentication\s\+yes' "$sshd" 2>/dev/null; then
+      ok "Autenticação por senha configurada."
+      info "Confirme após um reboot com: ${SSHD_BIN:-sshd} -T | grep -i passwordauth"
+    else
+      warn "Não foi possível confirmar PasswordAuthentication."
+      warn "Verifique com: ${SSHD_BIN:-sshd} -T | grep -i passwordauth"
+    fi
   fi
 }
 
