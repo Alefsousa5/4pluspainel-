@@ -1,0 +1,21 @@
+# ambiente Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# dados do painel (banco, chave de sessão)
+data/
+*.db
+*.db-wal
+*.db-shm
+secret.key
+
+# backups e logs
+*.tar.gz
+*.log
+
+# editor / sistema
+.vscode/
+.idea/
+.DS_Store

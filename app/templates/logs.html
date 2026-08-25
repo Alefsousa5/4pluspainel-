@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% set active = 'logs' %}
+{% block title %}Registros — {{ app_name }}{% endblock %}
+{% block heading %}Registros de atividade{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-head"><h2>Últimas {{ logs | length }} ações</h2></div>
+  {% if logs %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Quando</th><th>Quem</th><th>Ação</th><th>Alvo</th><th>Detalhe</th></tr></thead>
+      <tbody>
+        {% for log in logs %}
+        <tr>
+          <td class="muted">{{ log.created_at }}</td>
+          <td>{{ log.actor }}</td>
+          <td>{{ log.action }}</td>
+          <td class="mono">{{ log.target }}</td>
+          <td class="muted">{{ log.detail }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">Nenhum registro ainda.</p>
+  {% endif %}
+</section>
+{% endblock %}

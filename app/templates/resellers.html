@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% set active = 'resellers' %}
+{% block title %}Revendas — {{ app_name }}{% endblock %}
+{% block heading %}Revendas e administradores{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-head">
+    <h2>{{ admins | length }} acesso(s)</h2>
+    <span class="spacer"></span>
+    <button class="btn primary" onclick="newAdminModal()">+ Novo acesso</button>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Usuário</th><th>Perfil</th><th>Contas</th><th>Limite</th><th>Status</th><th>Último acesso</th><th>Ações</th></tr>
+      </thead>
+      <tbody>
+        {% for a in admins %}
+        <tr>
+          <td><b class="mono">{{ a.username }}</b>{% if a.id == user.id %} <small class="muted">(você)</small>{% endif %}</td>
+          <td><span class="badge {{ 'ativo' if a.role == 'admin' }}">{{ 'admin' if a.role == 'admin' else 'revenda' }}</span></td>
+          <td>{{ a.total_users }}</td>
+          <td>{{ a.user_limit if a.user_limit else 'ilimitado' }}</td>
+          <td><span class="badge {{ 'ok' if a.active else 'danger' }}">{{ 'ativo' if a.active else 'inativo' }}</span></td>
+          <td class="muted">{{ a.last_login or 'nunca' }}</td>
+          <td class="actions">
+            <button class="btn sm" onclick='editAdminModal({{ a | tojson }})'>Editar</button>
+            {% if a.id != user.id %}
+            <button class="btn sm danger" onclick='confirmAction("Remover o acesso {{ a.username }} e TODAS as {{ a.total_users }} conta(s) dele?", "/api/admins/{{ a.id }}/delete")'>Excluir</button>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function newAdminModal() {
+  openModal(`
+    <h3>Novo acesso ao painel</h3>
+    <p class="sub">Revendedores só enxergam e gerenciam as próprias contas SSH.</p>
+    <form onsubmit="return submitModal(this, '/api/admins')">
+      <label>Usuário
+        <input name="username" required pattern="[a-z_][a-z0-9_-]{2,31}" placeholder="ex: revenda01">
+      </label>
+      <label>Senha
+        <span class="pw-field">
+          <input name="password" id="ap" required>
+          <button type="button" class="btn" onclick="suggestPassword('ap')">🎲</button>
+        </span>
+      </label>
+      <div class="row-2">
+        <label>Perfil
+          <select name="role">
+            <option value="reseller">Revendedor</option>
+            <option value="admin">Administrador</option>
+          </select>
+        </label>
+        <label>Limite de contas
+          <input type="number" name="user_limit" value="10" min="0" max="9999">
+        </label>
+      </div>
+      <small class="muted">Limite 0 = ilimitado.</small>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" onclick="closeModal()">Cancelar</button>
+        <button type="submit" class="btn primary">Criar acesso</button>
+      </div>
+    </form>
+  `);
+}
+
+function editAdminModal(a) {
+  openModal(`
+    <h3>Editar ${esc(a.username)}</h3>
+    <p class="sub">Deixe a senha em branco para mantê-la.</p>
+    <form onsubmit="return submitModal(this, '/api/admins/${a.id}')">
+      <label>Nova senha
+        <span class="pw-field">
+          <input name="password" id="ep2" placeholder="manter a atual">
+          <button type="button" class="btn" onclick="suggestPassword('ep2')">🎲</button>
+        </span>
+      </label>
+      <div class="row-2">
+        <label>Limite de contas
+          <input type="number" name="user_limit" value="${a.user_limit}" min="0" max="9999">
+        </label>
+        <label>Situação
+          <select name="active">
+            <option value="1" ${a.active ? 'selected' : ''}>Ativo</option>
+            <option value="0" ${a.active ? '' : 'selected'}>Inativo</option>
+          </select>
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" onclick="closeModal()">Cancelar</button>
+        <button type="submit" class="btn primary">Salvar</button>
+      </div>
+    </form>
+  `);
+}
+</script>
+{% endblock %}
