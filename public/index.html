@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#07111f" />
+    <title>4G Plus Painel</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Menu principal">
+        <a class="brand" href="/" aria-label="4G Plus Painel">
+          <span class="brand-icon">4G</span>
+          <span>
+            <strong>4G Plus</strong>
+            <small>Painel Web</small>
+          </span>
+        </a>
+
+        <nav class="nav-list">
+          <a class="active" href="#dashboard">Dashboard</a>
+          <a href="#clientes">Clientes</a>
+          <a href="#planos">Planos</a>
+          <a href="#rede">Rede 4G</a>
+          <a href="#financeiro">Financeiro</a>
+          <a href="#suporte">Suporte</a>
+        </nav>
+
+        <div class="sidebar-card">
+          <span class="pulse"></span>
+          <div>
+            <strong>Servidor online</strong>
+            <small id="serverUptime">Sincronizando...</small>
+          </div>
+        </div>
+      </aside>
+
+      <main class="content">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Operação em tempo real</p>
+            <h1>Painel 4G Plus</h1>
+          </div>
+
+          <div class="topbar-actions">
+            <button class="ghost-button" id="refreshButton" type="button">Atualizar</button>
+            <span class="status-pill"><span></span> Online</span>
+          </div>
+        </header>
+
+        <section class="hero" id="dashboard">
+          <div class="hero-copy">
+            <span class="tag">VPS Ubuntu + GitHub + Arena</span>
+            <h2>Gerencie clientes, planos e status da rede em um só lugar.</h2>
+            <p>
+              Este painel já vem preparado para ser instalado na sua VPS Ubuntu com Nginx,
+              systemd e atualização via repositório GitHub.
+            </p>
+          </div>
+
+          <div class="hero-card">
+            <small>Qualidade do sinal</small>
+            <strong id="signalQuality">Excelente</strong>
+            <div class="signal-bars" aria-hidden="true">
+              <span></span><span></span><span></span><span></span><span></span>
+            </div>
+          </div>
+        </section>
+
+        <section class="metrics-grid" id="metricCards" aria-label="Indicadores principais">
+          <article class="metric-card skeleton"></article>
+          <article class="metric-card skeleton"></article>
+          <article class="metric-card skeleton"></article>
+          <article class="metric-card skeleton"></article>
+        </section>
+
+        <section class="dashboard-grid">
+          <article class="panel-card wide" id="rede">
+            <div class="card-heading">
+              <div>
+                <p class="eyebrow">Rede 4G</p>
+                <h3>Consumo por período</h3>
+              </div>
+              <span id="updatedAt">--</span>
+            </div>
+
+            <div class="chart" aria-label="Gráfico demonstrativo de tráfego">
+              <div style="--height: 44%"><span>Seg</span></div>
+              <div style="--height: 58%"><span>Ter</span></div>
+              <div style="--height: 76%"><span>Qua</span></div>
+              <div style="--height: 61%"><span>Qui</span></div>
+              <div style="--height: 88%"><span>Sex</span></div>
+              <div style="--height: 70%"><span>Sáb</span></div>
+              <div style="--height: 52%"><span>Dom</span></div>
+            </div>
+          </article>
+
+          <article class="panel-card" id="suporte">
+            <div class="card-heading">
+              <div>
+                <p class="eyebrow">Atalhos</p>
+                <h3>Ações rápidas</h3>
+              </div>
+            </div>
+
+            <div class="quick-actions">
+              <button type="button">Novo cliente</button>
+              <button type="button">Gerar cobrança</button>
+              <button type="button">Abrir chamado</button>
+              <button type="button">Testar conexão</button>
+            </div>
+          </article>
+
+          <article class="panel-card wide" id="planos">
+            <div class="card-heading">
+              <div>
+                <p class="eyebrow">Planos</p>
+                <h3>Pacotes ativos</h3>
+              </div>
+              <a href="https://github.com/Alefsousa5/4pluspainel-" target="_blank" rel="noreferrer">GitHub</a>
+            </div>
+
+            <div class="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Plano</th>
+                    <th>Velocidade</th>
+                    <th>Clientes</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="plansTable">
+                  <tr><td colspan="4">Carregando planos...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="panel-card" id="clientes">
+            <div class="card-heading">
+              <div>
+                <p class="eyebrow">Sistema</p>
+                <h3>Status da VPS</h3>
+              </div>
+            </div>
+
+            <dl class="status-list">
+              <div>
+                <dt>Ambiente</dt>
+                <dd id="statusEnvironment">--</dd>
+              </div>
+              <div>
+                <dt>Node.js</dt>
+                <dd id="statusNode">--</dd>
+              </div>
+              <div>
+                <dt>Branch</dt>
+                <dd id="statusBranch">--</dd>
+              </div>
+              <div>
+                <dt>Host</dt>
+                <dd id="statusHost">--</dd>
+              </div>
+            </dl>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

@@ -1,0 +1,25 @@
+{
+  "name": "4pluspainel",
+  "version": "1.0.0",
+  "description": "Painel web 4G Plus com instalador para VPS Ubuntu.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "NODE_ENV=development node server.js",
+    "check": "node --check server.js"
+  },
+  "keywords": [
+    "4g",
+    "painel",
+    "ubuntu",
+    "vps",
+    "nginx",
+    "systemd"
+  ],
+  "author": "Alefsousa5",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}
