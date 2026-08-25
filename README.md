@@ -10,30 +10,34 @@ data de expiração aplicada no próprio Linux.
 
 ## Instalação na VPS
 
-> **Atenção:** enquanto o código estiver apenas na branch de trabalho
-> (`arena/01a038fb-4pluspainel`) e não na `main`, use os comandos abaixo com
-> `-b arena/01a038fb-4pluspainel`. Depois de fazer o merge na `main`, os
-> comandos com `main` passam a funcionar normalmente.
-
-Como **root**, em uma VPS Debian 11+ / Ubuntu 20.04+:
+Em uma VPS **Debian 11+ / Ubuntu 20.04+**, como **root**:
 
 ```bash
-git clone -b arena/01a038fb-4pluspainel https://github.com/Alefsousa5/4pluspainel-.git
+git clone https://github.com/Alefsousa5/4pluspainel-.git
 cd 4pluspainel-
 sudo bash install.sh
 ```
 
-Ou pelo instalador direto (ele procura sozinho a branch que contém o painel):
+> Enquanto o [PR #1](https://github.com/Alefsousa5/4pluspainel-/pull/1) não for
+> aprovado, o código está na branch de trabalho. O instalador **procura sozinho**
+> a branch que contém o painel, então o comando acima funciona nos dois casos.
+> Para clonar direto dela:
+> `git clone -b arena/01a038fb-4pluspainel https://github.com/Alefsousa5/4pluspainel-.git`
 
-```bash
-curl -sSLO https://raw.githubusercontent.com/Alefsousa5/4pluspainel-/arena/01a038fb-4pluspainel/install.sh
-sudo bash install.sh
+Ao final ele mostra na tela:
+
+```
+   Acesse:  http://SEU_IP:8080
+   Usuário: admin
+   Senha:   ********
 ```
 
-Se o repositório estiver em outra branch, é só informar:
+Esses dados também ficam salvos em `/opt/4pluspainel/acesso.txt` (só o root lê).
+Se fechar o terminal, recupere com:
 
 ```bash
-sudo REPO_BRANCH=minha-branch bash install.sh
+sudo painel acesso     # mostra IP, usuário e senha
+sudo painel senha      # define uma nova senha
 ```
 
 O instalador pergunta a **porta**, o **usuário admin** e a **senha** (quando

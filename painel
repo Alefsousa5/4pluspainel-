@@ -84,6 +84,22 @@ else:
             " VALUES (?, ?, 'admin', 0, 1, ?)", (u, hash_password(p), now()))
     print("administrador criado")
 PY
+    # Mantém o arquivo de credenciais em dia com a nova senha.
+    f="${INSTALL_DIR}/acesso.txt"
+    ip="$(curl -s --max-time 4 https://api.ipify.org 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')"
+    cat > "$f" <<EOF
+===== 4Plus Painel — dados de acesso =====
+Atualizado em: $(date '+%d/%m/%Y %H:%M:%S')
+
+Endereço : http://${ip}:$(panel_port)
+Usuário  : ${u}
+Senha    : ${p}
+
+Trocar a senha : sudo painel senha
+Ver este arquivo: sudo painel acesso
+==========================================
+EOF
+    chmod 600 "$f" 2>/dev/null || true
     ok "Senha de '${u}' atualizada."
     ;;
   doctor|diagnostico)
@@ -170,6 +186,23 @@ PY
       || die "Falha ao instalar as dependências. Verifique a internet da VPS."
     systemctl restart "$SERVICE" 2>/dev/null || true
     ok "Ambiente recriado. Rode 'painel doctor' para conferir."
+    ;;
+  acesso|credenciais)
+    need_root
+    f="${INSTALL_DIR}/acesso.txt"
+    port="$(panel_port)"
+    ip="$(curl -s --max-time 4 https://api.ipify.org 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')"
+    echo
+    if [[ -f "$f" ]]; then
+      cat "$f"
+      echo
+      echo "  ${YELLOW}Se o IP acima estiver desatualizado, use:${NC} http://${ip}:${port}"
+    else
+      echo "  ${YELLOW}[!]${NC} Arquivo de credenciais não encontrado."
+      echo "      Endereço do painel: http://${ip}:${port}"
+      echo "      Para definir uma nova senha: sudo painel senha"
+    fi
+    echo
     ;;
   relatorio|report)
     # Junta tudo o que é preciso para diagnosticar a instalação.
@@ -266,6 +299,7 @@ PY
     echo "  ${BOLD}painel${NC} status | start | stop | restart"
     echo "  ${BOLD}painel${NC} logs            acompanhar o log"
     echo "  ${BOLD}painel${NC} porta <numero>  trocar a porta"
+    echo "  ${BOLD}painel${NC} acesso          mostrar IP, usuário e senha"
     echo "  ${BOLD}painel${NC} senha           trocar senha do admin"
     echo "  ${BOLD}painel${NC} doctor          diagnosticar a instalação"
     echo "  ${BOLD}painel${NC} reparar         recriar o ambiente Python"

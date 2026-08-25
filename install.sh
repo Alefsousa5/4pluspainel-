@@ -211,6 +211,19 @@ clone_repo() {
     candidates=("$REPO_BRANCH")
   else
     candidates=("${FALLBACK_BRANCHES[@]}")
+    # Descobre TODAS as branches do repositório: assim o instalador acha o
+    # código mesmo que ele esteja numa branch que não conhecemos de antemão.
+    local remote_branches
+    remote_branches="$(git ls-remote --heads "$REPO_URL" 2>/dev/null \
+                       | sed 's#.*refs/heads/##' | grep -v '^$' || true)"
+    local b
+    while IFS= read -r b; do
+      [[ -z "$b" ]] && continue
+      # evita repetir as candidatas já listadas
+      local seen="" c
+      for c in "${candidates[@]}"; do [[ "$c" == "$b" ]] && seen=1 && break; done
+      [[ -z "$seen" ]] && candidates+=("$b")
+    done <<< "$remote_branches"
   fi
 
   local tmp br
@@ -602,8 +615,29 @@ public_ip() {
   echo "${ip:-SEU_IP}"
 }
 
+# Guarda os dados de acesso em disco: se o terminal for fechado, as
+# credenciais não se perdem. Arquivo legível apenas pelo root.
+save_credentials() {
+  local ip="$1"
+  local f="${INSTALL_DIR}/acesso.txt"
+  cat > "$f" <<EOF
+===== 4Plus Painel — dados de acesso =====
+Instalado em : $(date '+%d/%m/%Y %H:%M:%S')
+
+Endereço : http://${ip}:${PORT}
+Usuário  : ${ADMIN_USER}
+Senha    : ${ADMIN_PASS}
+
+Trocar a senha : sudo painel senha
+Ver este arquivo: sudo painel acesso
+==========================================
+EOF
+  chmod 600 "$f" 2>/dev/null || true
+}
+
 finish() {
   local ip; ip="$(public_ip)"
+  save_credentials "$ip"
   echo
   echo "${GREEN}${BOLD}   ╔══════════════════════════════════════════╗${NC}"
   echo "${GREEN}${BOLD}   ║        INSTALAÇÃO CONCLUÍDA! 🎉          ║${NC}"
@@ -613,7 +647,8 @@ finish() {
   echo "   ${BOLD}Usuário:${NC} ${ADMIN_USER}"
   echo "   ${BOLD}Senha:${NC}   ${ADMIN_PASS}"
   echo
-  echo "   ${YELLOW}Anote a senha agora — ela não será exibida novamente.${NC}"
+  echo "   ${YELLOW}Anote a senha. Se precisar, ela também fica guardada em${NC}"
+  echo "   ${YELLOW}${INSTALL_DIR}/acesso.txt — veja com: sudo painel acesso${NC}"
   echo
   echo "   Comandos úteis:"
   echo "     painel status      — situação do serviço"
