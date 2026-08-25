@@ -35,10 +35,18 @@ die() {
 
 DIED=0
 on_error() {
-  local line="$1"
-  [[ "$DIED" == "1" ]] && exit 1   # erro já reportado por die()
+  local line="$1" cmd="${BASH_COMMAND:-?}"
+  if [[ "$DIED" == "1" ]]; then
+    # Erro já explicado por die(); só aponta o log.
+    [[ -n "${LOGFILE:-}" && -f "${LOGFILE:-}" ]] && \
+      echo "    Log completo em: ${LOGFILE}" >&2
+    exit 1
+  fi
   echo "${RED}[x]${NC} Falha inesperada na linha ${line}." >&2
-  echo "    Rode novamente; se persistir, envie a saída acima." >&2
+  echo "    Comando: ${cmd}" >&2
+  [[ -n "${LOGFILE:-}" && -f "${LOGFILE:-}" ]] && \
+    echo "    Log completo em: ${LOGFILE}" >&2
+  echo "    Envie esse arquivo (ou as últimas linhas dele) para análise." >&2
   exit 1
 }
 trap 'on_error $LINENO' ERR
@@ -616,7 +624,25 @@ finish() {
   echo
 }
 
+# Tudo o que aparece na tela também vai para um arquivo de log. Se algo der
+# errado, esse arquivo tem o comando exato que falhou e a saída completa.
+LOGFILE="/var/log/4pluspainel-install.log"
+start_logging() {
+  : > "$LOGFILE" 2>/dev/null || LOGFILE="/tmp/4pluspainel-install.log"
+  {
+    echo "===== 4Plus Painel — instalação em $(date '+%Y-%m-%d %H:%M:%S') ====="
+    echo "sistema : $(. /etc/os-release 2>/dev/null && echo "${PRETTY_NAME:-desconhecido}")"
+    echo "kernel  : $(uname -srm)"
+    echo "python  : $(python3 -V 2>&1)"
+    echo "disco   : $(df -h / 2>/dev/null | awk 'NR==2{print $4" livre de "$2}')"
+    echo "memoria : $(free -m 2>/dev/null | awk '/Mem:/{print $7"MB disponivel"}')"
+    echo "=================================================================="
+  } >> "$LOGFILE" 2>&1
+  exec > >(tee -a "$LOGFILE") 2>&1
+}
+
 main() {
+  start_logging
   banner
   check_root
   check_os

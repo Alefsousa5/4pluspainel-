@@ -80,6 +80,17 @@ sudo PANEL_PUBLIC_HOST=vpn.seudominio.com bash install.sh
 
 ### Se algo der errado
 
+O instalador grava tudo em **`/var/log/4pluspainel-install.log`** e, se falhar,
+mostra o comando exato que quebrou. Para um diagnóstico completo:
+
+```bash
+sudo painel relatorio     # gera /tmp/4pluspainel-relatorio-*.txt
+```
+
+O relatório reúne versão do sistema e do Python, pacotes instalados, estado do
+serviço, log do systemd, porta em escuta e configuração do SSH — com as senhas
+mascaradas. É o arquivo mais útil para descobrir o que está errado.
+
 | Sintoma | Causa provável / solução |
 |---|---|
 | `install.sh: No such file or directory` | O clone veio da `main`, que ainda não tem o código. Use `git clone -b arena/01a038fb-4pluspainel ...` |
@@ -111,6 +122,7 @@ sudo PANEL_PUBLIC_HOST=vpn.seudominio.com bash install.sh
 | `painel senha` | redefine a senha de um administrador |
 | `painel doctor` | diagnostica a instalação (Python, dependências, banco, serviço) |
 | `painel reparar` | recria o ambiente Python quando as dependências quebram |
+| `painel relatorio` | gera um relatório completo para diagnóstico (sem senhas) |
 | `painel backup` | salva o banco em `/root/4pluspainel-backup-*.tar.gz` |
 | `painel atualizar` | atualiza via git e reinicia |
 | `painel desinstalar` | remove o painel (contas SSH do sistema são preservadas) |

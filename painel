@@ -171,6 +171,57 @@ PY
     systemctl restart "$SERVICE" 2>/dev/null || true
     ok "Ambiente recriado. Rode 'painel doctor' para conferir."
     ;;
+  relatorio|report)
+    # Junta tudo o que é preciso para diagnosticar a instalação.
+    out="/tmp/4pluspainel-relatorio-$(date +%Y%m%d-%H%M%S).txt"
+    {
+      echo "===== RELATÓRIO 4PLUS PAINEL ====="
+      echo "data     : $(date '+%Y-%m-%d %H:%M:%S')"
+      echo "sistema  : $(. /etc/os-release 2>/dev/null && echo "${PRETTY_NAME:-?}")"
+      echo "kernel   : $(uname -srm)"
+      echo "python   : $(python3 -V 2>&1)"
+      echo "disco    : $(df -h / 2>/dev/null | awk 'NR==2{print $4" livre de "$2}')"
+      echo "memoria  : $(free -m 2>/dev/null | awk '/Mem:/{print $7"MB de "$2"MB"}')"
+      echo
+      echo "--- venv ---"
+      if [[ -x "${INSTALL_DIR}/.venv/bin/python" ]]; then
+        "${INSTALL_DIR}/.venv/bin/python" -V 2>&1
+        "${INSTALL_DIR}/.venv/bin/python" -m pip list 2>/dev/null | grep -iE "fastapi|uvicorn|jinja|itsdanger|multipart|pydantic|starlette"
+        echo "-- importa o painel? --"
+        (cd "$INSTALL_DIR" && "${INSTALL_DIR}/.venv/bin/python" -c "import app.main; print('import OK')" 2>&1 | tail -12)
+      else
+        echo "AUSENTE em ${INSTALL_DIR}/.venv"
+      fi
+      echo
+      echo "--- serviço ---"
+      systemctl is-active "$SERVICE" 2>&1
+      systemctl is-enabled "$SERVICE" 2>&1
+      systemctl show "$SERVICE" -p NRestarts 2>/dev/null
+      echo
+      echo "--- unit ---"
+      cat "/etc/systemd/system/${SERVICE}.service" 2>&1
+      echo
+      echo "--- últimas 60 linhas do log do serviço ---"
+      journalctl -u "$SERVICE" -n 60 --no-pager 2>&1
+      echo
+      echo "--- porta ---"
+      p="$(panel_port)"; echo "configurada: $p"
+      (ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null) | grep ":${p}" || echo "nada ouvindo em $p"
+      echo "curl local: $(curl -s -o /dev/null -w '%{http_code}' -m 5 "http://127.0.0.1:${p}/health" 2>&1)"
+      echo
+      echo "--- SSH ---"
+      (sshd -T 2>/dev/null || /usr/sbin/sshd -T 2>/dev/null) | grep -iE "^(port|passwordauthentication)" || echo "sshd -T indisponível"
+      echo
+      echo "--- log de instalação (últimas 40 linhas) ---"
+      tail -n 40 /var/log/4pluspainel-install.log 2>/dev/null \
+        || tail -n 40 /tmp/4pluspainel-install.log 2>/dev/null \
+        || echo "sem log de instalação"
+    } > "$out" 2>&1
+    # Remove senhas que possam ter entrado no relatório.
+    sed -i -E 's/(senha|password|pass)[[:space:]]*[:=][[:space:]]*[^[:space:]]+/\1: ***/Ig' "$out"
+    ok "Relatório salvo em: ${out}"
+    echo "  Envie esse arquivo para análise. Ver agora: cat ${out}"
+    ;;
   backup)
     need_root
     dest="/root/4pluspainel-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
@@ -218,6 +269,7 @@ PY
     echo "  ${BOLD}painel${NC} senha           trocar senha do admin"
     echo "  ${BOLD}painel${NC} doctor          diagnosticar a instalação"
     echo "  ${BOLD}painel${NC} reparar         recriar o ambiente Python"
+    echo "  ${BOLD}painel${NC} relatorio       gerar relatório para diagnóstico"
     echo "  ${BOLD}painel${NC} backup          salvar o banco de dados"
     echo "  ${BOLD}painel${NC} atualizar       atualizar o painel"
     echo "  ${BOLD}painel${NC} desinstalar     remover o painel"
