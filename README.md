@@ -13,16 +13,15 @@ data de expiração aplicada no próprio Linux.
 Em uma VPS **Debian 11+ / Ubuntu 20.04+**, como **root**:
 
 ```bash
-git clone https://github.com/Alefsousa5/4pluspainel-.git
+git clone -b arena/01a038fb-4pluspainel https://github.com/Alefsousa5/4pluspainel-.git
 cd 4pluspainel-
 sudo bash install.sh
 ```
 
-> Enquanto o [PR #1](https://github.com/Alefsousa5/4pluspainel-/pull/1) não for
-> aprovado, o código está na branch de trabalho. O instalador **procura sozinho**
-> a branch que contém o painel, então o comando acima funciona nos dois casos.
-> Para clonar direto dela:
-> `git clone -b arena/01a038fb-4pluspainel https://github.com/Alefsousa5/4pluspainel-.git`
+> **Por que o `-b`?** O código ainda está na branch de trabalho — a `main` tem
+> apenas o README. Depois que o [PR #1](https://github.com/Alefsousa5/4pluspainel-/pull/1)
+> for aprovado, o clone simples (`git clone https://github.com/Alefsousa5/4pluspainel-.git`)
+> passa a funcionar e o `-b` deixa de ser necessário.
 
 Ao final ele mostra na tela:
 
