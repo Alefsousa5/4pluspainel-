@@ -81,6 +81,21 @@ sudo PANEL_PUBLIC_HOST=vpn.seudominio.com bash install.sh
 
 ---
 
+### Antes de instalar (recomendado)
+
+Se a instalação falhar, rode o diagnóstico — ele **não instala nada**, só
+verifica se a VPS tem tudo o que é preciso e aponta o que corrigir:
+
+```bash
+sudo bash diagnostico.sh
+```
+
+Ele confere sistema, disco, memória, versão do Python, suporte a ambiente
+virtual, ferramentas (git, curl, useradd...), acesso a GitHub e PyPI,
+configuração do SSH e se a porta está livre. Cada problema vem com o
+comando exato para resolver. Depois de instalado, o mesmo teste está
+disponível como `sudo painel-diagnostico`.
+
 ### Se algo der errado
 
 O instalador grava tudo em **`/var/log/4pluspainel-install.log`** e, se falhar,

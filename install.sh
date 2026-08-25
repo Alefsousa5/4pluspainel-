@@ -46,7 +46,9 @@ on_error() {
   echo "    Comando: ${cmd}" >&2
   [[ -n "${LOGFILE:-}" && -f "${LOGFILE:-}" ]] && \
     echo "    Log completo em: ${LOGFILE}" >&2
-  echo "    Envie esse arquivo (ou as últimas linhas dele) para análise." >&2
+  echo >&2
+  echo "    Para descobrir a causa, rode:  ${BOLD}sudo bash diagnostico.sh${NC}" >&2
+  echo "    Ele verifica Python, rede, disco, porta e permissões." >&2
   exit 1
 }
 trap 'on_error $LINENO' ERR
@@ -594,6 +596,17 @@ EOF
   fi
 }
 
+install_diagnostico() {
+  local src; src="$(dirname "$(readlink -f "$0")")"
+  local f
+  for f in "${src}/diagnostico.sh" "${INSTALL_DIR}/diagnostico.sh"; do
+    if [[ -f "$f" ]]; then
+      install -m 755 "$f" /usr/local/bin/painel-diagnostico 2>/dev/null && return 0
+    fi
+  done
+  return 0
+}
+
 install_cli() {
   if [[ -f "${INSTALL_DIR}/painel" ]]; then
     install -m 755 "${INSTALL_DIR}/painel" /usr/local/bin/painel
@@ -690,6 +703,7 @@ main() {
   configure_ssh
   create_service
   install_cli
+  install_diagnostico
   open_firewall
   finish
 }
