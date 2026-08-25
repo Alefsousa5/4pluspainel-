@@ -4,34 +4,33 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#07111f" />
-    <title>4G Plus Painel</title>
+    <title>4G Plus SSH Painel</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <div class="app-shell">
       <aside class="sidebar" aria-label="Menu principal">
-        <a class="brand" href="/" aria-label="4G Plus Painel">
+        <a class="brand" href="/" aria-label="4G Plus SSH Painel">
           <span class="brand-icon">4G</span>
           <span>
             <strong>4G Plus</strong>
-            <small>Painel Web</small>
+            <small>SSH Painel</small>
           </span>
         </a>
 
         <nav class="nav-list">
           <a class="active" href="#dashboard">Dashboard</a>
-          <a href="#clientes">Clientes</a>
-          <a href="#planos">Planos</a>
-          <a href="#rede">Rede 4G</a>
-          <a href="#financeiro">Financeiro</a>
-          <a href="#suporte">Suporte</a>
+          <a href="#criar">Criar usuário</a>
+          <a href="#usuarios">Usuários SSH</a>
+          <a href="#servidores">Servidores</a>
+          <a href="#sistema">Sistema</a>
         </nav>
 
         <div class="sidebar-card">
           <span class="pulse"></span>
           <div>
-            <strong>Servidor online</strong>
+            <strong id="authState">Aguardando login</strong>
             <small id="serverUptime">Sincronizando...</small>
           </div>
         </div>
@@ -40,29 +39,31 @@
       <main class="content">
         <header class="topbar">
           <div>
-            <p class="eyebrow">Operação em tempo real</p>
-            <h1>Painel 4G Plus</h1>
+            <p class="eyebrow">Gerenciamento de contas SSH</p>
+            <h1>4G Plus SSH Painel</h1>
           </div>
 
           <div class="topbar-actions">
+            <button class="ghost-button" id="loginButton" type="button">Entrar</button>
             <button class="ghost-button" id="refreshButton" type="button">Atualizar</button>
-            <span class="status-pill"><span></span> Online</span>
+            <span class="status-pill"><span></span> API online</span>
           </div>
         </header>
 
         <section class="hero" id="dashboard">
           <div class="hero-copy">
-            <span class="tag">VPS Ubuntu + GitHub + Arena</span>
-            <h2>Gerencie clientes, planos e status da rede em um só lugar.</h2>
+            <span class="tag">VPS Ubuntu + SSH + Nginx + GitHub</span>
+            <h2>Crie usuários SSH e aloque automaticamente no servidor com vagas livres.</h2>
             <p>
-              Este painel já vem preparado para ser instalado na sua VPS Ubuntu com Nginx,
-              systemd e atualização via repositório GitHub.
+              O painel cadastra contas SSH, define validade, limite de conexões, bloqueia/exclui usuários
+              e organiza a alocação por servidor. Na VPS local, o instalador habilita provisionamento com
+              usuários Linux reais via helper seguro.
             </p>
           </div>
 
           <div class="hero-card">
-            <small>Qualidade do sinal</small>
-            <strong id="signalQuality">Excelente</strong>
+            <small>Provisionamento</small>
+            <strong id="provisionMode">Manual</strong>
             <div class="signal-bars" aria-hidden="true">
               <span></span><span></span><span></span><span></span><span></span>
             </div>
@@ -77,47 +78,91 @@
         </section>
 
         <section class="dashboard-grid">
-          <article class="panel-card wide" id="rede">
+          <article class="panel-card" id="criar">
             <div class="card-heading">
               <div>
-                <p class="eyebrow">Rede 4G</p>
-                <h3>Consumo por período</h3>
-              </div>
-              <span id="updatedAt">--</span>
-            </div>
-
-            <div class="chart" aria-label="Gráfico demonstrativo de tráfego">
-              <div style="--height: 44%"><span>Seg</span></div>
-              <div style="--height: 58%"><span>Ter</span></div>
-              <div style="--height: 76%"><span>Qua</span></div>
-              <div style="--height: 61%"><span>Qui</span></div>
-              <div style="--height: 88%"><span>Sex</span></div>
-              <div style="--height: 70%"><span>Sáb</span></div>
-              <div style="--height: 52%"><span>Dom</span></div>
-            </div>
-          </article>
-
-          <article class="panel-card" id="suporte">
-            <div class="card-heading">
-              <div>
-                <p class="eyebrow">Atalhos</p>
-                <h3>Ações rápidas</h3>
+                <p class="eyebrow">Novo acesso</p>
+                <h3>Criar usuário SSH</h3>
               </div>
             </div>
 
-            <div class="quick-actions">
-              <button type="button">Novo cliente</button>
-              <button type="button">Gerar cobrança</button>
-              <button type="button">Abrir chamado</button>
-              <button type="button">Testar conexão</button>
+            <form class="form-grid" id="createUserForm">
+              <label>
+                Usuário
+                <input id="usernameInput" name="username" autocomplete="off" placeholder="cliente001" required />
+              </label>
+
+              <label>
+                Senha
+                <div class="inline-input">
+                  <input id="passwordInput" name="password" autocomplete="new-password" placeholder="deixe vazio para gerar" type="text" />
+                  <button class="mini-button" id="generatePasswordButton" type="button">Gerar</button>
+                </div>
+              </label>
+
+              <label>
+                Validade em dias
+                <input id="daysInput" name="days" type="number" min="1" max="3650" value="30" required />
+              </label>
+
+              <label>
+                Limite de conexões
+                <input id="maxConnectionsInput" name="maxConnections" type="number" min="1" max="999" value="1" required />
+              </label>
+
+              <label class="full-row">
+                Servidor SSH
+                <select id="serverSelect" name="serverId">
+                  <option value="auto">Alocar automaticamente</option>
+                </select>
+              </label>
+
+              <button class="primary-button full-row" type="submit">Criar e alocar usuário</button>
+            </form>
+
+            <div class="credentials-card hidden" id="credentialsCard">
+              <div>
+                <p class="eyebrow">Credenciais geradas</p>
+                <h4 id="credentialsTitle">Usuário criado</h4>
+              </div>
+              <pre id="credentialsOutput"></pre>
+              <button class="ghost-button" id="copyCredentialsButton" type="button">Copiar credenciais</button>
             </div>
           </article>
 
-          <article class="panel-card wide" id="planos">
+          <article class="panel-card wide" id="usuarios">
             <div class="card-heading">
               <div>
-                <p class="eyebrow">Planos</p>
-                <h3>Pacotes ativos</h3>
+                <p class="eyebrow">Contas SSH</p>
+                <h3>Usuários cadastrados</h3>
+              </div>
+              <span id="usersCount">--</span>
+            </div>
+
+            <div class="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Usuário</th>
+                    <th>Servidor</th>
+                    <th>Validade</th>
+                    <th>Conexões</th>
+                    <th>Status</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="usersTable">
+                  <tr><td colspan="6">Faça login para carregar usuários.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="panel-card wide" id="servidores">
+            <div class="card-heading">
+              <div>
+                <p class="eyebrow">Alocação</p>
+                <h3>Servidores SSH</h3>
               </div>
               <a href="https://github.com/Alefsousa5/4pluspainel-" target="_blank" rel="noreferrer">GitHub</a>
             </div>
@@ -126,20 +171,64 @@
               <table>
                 <thead>
                   <tr>
-                    <th>Plano</th>
-                    <th>Velocidade</th>
-                    <th>Clientes</th>
+                    <th>Servidor</th>
+                    <th>Host/IP</th>
+                    <th>Porta</th>
+                    <th>Uso</th>
+                    <th>Tipo</th>
                     <th>Status</th>
+                    <th>Ações</th>
                   </tr>
                 </thead>
-                <tbody id="plansTable">
-                  <tr><td colspan="4">Carregando planos...</td></tr>
+                <tbody id="serversTable">
+                  <tr><td colspan="7">Faça login para carregar servidores.</td></tr>
                 </tbody>
               </table>
             </div>
           </article>
 
-          <article class="panel-card" id="clientes">
+          <article class="panel-card" id="novo-servidor">
+            <div class="card-heading">
+              <div>
+                <p class="eyebrow">Adicionar VPS</p>
+                <h3>Novo servidor SSH</h3>
+              </div>
+            </div>
+
+            <form class="form-grid" id="createServerForm">
+              <label>
+                Nome
+                <input id="serverNameInput" placeholder="VPS Brasília 01" required />
+              </label>
+
+              <label>
+                Host/IP
+                <input id="serverHostInput" placeholder="123.123.123.123" required />
+              </label>
+
+              <label>
+                Porta SSH
+                <input id="serverPortInput" type="number" min="1" max="65535" value="22" required />
+              </label>
+
+              <label>
+                Capacidade
+                <input id="serverCapacityInput" type="number" min="1" max="100000" value="100" required />
+              </label>
+
+              <label class="full-row">
+                Tipo
+                <select id="serverKindInput">
+                  <option value="remote">Remoto / apenas alocação</option>
+                  <option value="local">Local / provisionar nesta VPS</option>
+                </select>
+              </label>
+
+              <button class="primary-button full-row" type="submit">Adicionar servidor</button>
+            </form>
+          </article>
+
+          <article class="panel-card" id="sistema">
             <div class="card-heading">
               <div>
                 <p class="eyebrow">Sistema</p>
@@ -161,14 +250,41 @@
                 <dd id="statusBranch">--</dd>
               </div>
               <div>
-                <dt>Host</dt>
-                <dd id="statusHost">--</dd>
+                <dt>Host padrão SSH</dt>
+                <dd id="statusSshHost">--</dd>
+              </div>
+              <div>
+                <dt>Diretório de dados</dt>
+                <dd id="statusDataDir">--</dd>
               </div>
             </dl>
           </article>
         </section>
       </main>
     </div>
+
+    <div class="modal-backdrop hidden" id="loginModal" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+      <div class="modal-card">
+        <p class="eyebrow">Acesso administrativo</p>
+        <h2 id="loginTitle">Entrar no painel</h2>
+        <p>
+          Informe o <strong>ADMIN_TOKEN</strong> gerado pelo instalador. Ele aparece no fim da instalação
+          e também fica no arquivo <code>/opt/4pluspainel/.env</code>.
+        </p>
+
+        <form class="form-grid" id="loginForm">
+          <label class="full-row">
+            Token administrativo
+            <input id="adminTokenInput" type="password" autocomplete="current-password" placeholder="cole o token aqui" required />
+          </label>
+          <button class="primary-button full-row" type="submit">Entrar</button>
+        </form>
+
+        <small class="muted-text">Em desenvolvimento local, se nenhum token foi configurado, use: <code>admin</code>.</small>
+      </div>
+    </div>
+
+    <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
 
     <script src="/app.js" defer></script>
   </body>
