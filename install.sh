@@ -221,13 +221,73 @@ fetch_code() {
   ok "Arquivos em ${INSTALL_DIR}"
 }
 
+# Instala o pacote venv correspondente à versão do Python presente.
+# Em Debian/Ubuntu o 'python3-venv' nem sempre traz o ensurepip: é preciso o
+# pacote versionado (python3.8-venv, python3.11-venv, ...).
+ensure_venv_support() {
+  local pyver
+  pyver="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || echo "")"
+
+  if python3 -c 'import ensurepip' >/dev/null 2>&1; then
+    return 0
+  fi
+
+  info "Instalando suporte a ambientes virtuais (python${pyver}-venv)..."
+  export DEBIAN_FRONTEND=noninteractive
+  if [[ -n "$pyver" ]]; then
+    apt-get install -y -qq "python${pyver}-venv" >/dev/null 2>&1 || true
+  fi
+  python3 -c 'import ensurepip' >/dev/null 2>&1 && return 0
+
+  apt-get install -y -qq python3-venv >/dev/null 2>&1 || true
+  python3 -c 'import ensurepip' >/dev/null 2>&1 && return 0
+
+  die "O Python desta VPS não tem suporte a ambientes virtuais.
+      Instale manualmente e rode o instalador de novo:
+        apt update && apt install -y python${pyver:-3}-venv"
+}
+
 setup_venv() {
+  local venv="${INSTALL_DIR}/.venv"
+  local py="${venv}/bin/python"
+
+  ensure_venv_support
+
+  # Recria do zero: um venv copiado/movido de outro caminho fica com os
+  # scripts apontando para o diretório antigo e nada funciona.
   info "Criando ambiente virtual Python..."
-  python3 -m venv "${INSTALL_DIR}/.venv"
-  "${INSTALL_DIR}/.venv/bin/pip" install --quiet --upgrade pip
-  "${INSTALL_DIR}/.venv/bin/pip" install --quiet -r "${INSTALL_DIR}/requirements.txt" \
-    || die "Falha ao instalar as dependências Python."
-  ok "Ambiente Python pronto."
+  rm -rf "$venv"
+  if ! python3 -m venv "$venv" 2>/tmp/4plus_venv.err; then
+    warn "Falha ao criar o ambiente virtual:"
+    sed 's/^/      /' /tmp/4plus_venv.err >&2 || true
+    die "Não foi possível criar o ambiente virtual Python."
+  fi
+
+  [[ -x "$py" ]] || die "Ambiente virtual criado de forma incompleta em ${venv}."
+
+  # Usa 'python -m pip' em vez do script bin/pip: independe do shebang.
+  info "Instalando dependências Python (pode levar alguns minutos)..."
+  "$py" -m pip install --quiet --upgrade pip setuptools wheel 2>/dev/null \
+    || warn "Não foi possível atualizar o pip; seguindo com a versão atual."
+
+  if ! "$py" -m pip install --quiet -r "${INSTALL_DIR}/requirements.txt" 2>/tmp/4plus_pip.err; then
+    warn "Falha ao instalar as dependências. Detalhe:"
+    tail -n 15 /tmp/4plus_pip.err | sed 's/^/      /' >&2 || true
+    die "Não foi possível instalar as dependências Python.
+      Verifique a conexão da VPS com a internet (pypi.org) e tente de novo."
+  fi
+
+  # Confirma que o painel realmente importa dentro do venv.
+  if ! (cd "$INSTALL_DIR" && "$py" -c 'import fastapi, uvicorn, jinja2, itsdangerous' 2>/tmp/4plus_imp.err); then
+    warn "As dependências não puderam ser carregadas:"
+    tail -n 10 /tmp/4plus_imp.err | sed 's/^/      /' >&2 || true
+    die "Ambiente Python incompleto."
+  fi
+
+  local pyver uvi
+  pyver="$("$py" -c 'import sys;print("%d.%d"%sys.version_info[:2])' 2>/dev/null || echo "?")"
+  uvi="$("$py" -c 'import uvicorn;print(uvicorn.__version__)' 2>/dev/null || echo "?")"
+  ok "Ambiente Python pronto (Python ${pyver}, uvicorn ${uvi})."
 }
 
 create_admin() {
@@ -363,7 +423,7 @@ Environment=PANEL_DATA_DIR=${DATA_DIR}
 Environment=PANEL_PORT=${PORT}
 Environment=PANEL_PUBLIC_HOST=${PUBLIC_HOST}
 Environment=PYTHONUNBUFFERED=1
-ExecStart=${INSTALL_DIR}/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port ${PORT}
+ExecStart=${INSTALL_DIR}/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT}
 Restart=always
 RestartSec=5
 

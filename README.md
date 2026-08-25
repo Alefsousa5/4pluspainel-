@@ -86,6 +86,9 @@ sudo PANEL_PUBLIC_HOST=vpn.seudominio.com bash install.sh
 | `A branch 'main' não contém o painel` | Normal — o instalador avisa e tenta a próxima branch sozinho. |
 | Não abre no navegador | Libere a porta no firewall do provedor (Oracle/AWS/Contabo têm firewall próprio, fora do UFW). Confira com `painel status`. |
 | Serviço não sobe | Veja o erro real com `painel logs` ou `journalctl -u 4pluspainel -n 50`. |
+| `ensurepip is not available` | Falta o pacote venv do Python. O instalador tenta resolver sozinho; se não conseguir: `apt install -y python3-venv` (ou `python3.8-venv`, conforme a versão). |
+| `Falha ao instalar as dependências Python` | Geralmente é falta de acesso ao pypi.org. O instalador agora mostra o erro real do pip. Para recriar o ambiente: `sudo painel reparar`. |
+| Painel parou depois de uma atualização | `sudo painel doctor` aponta o que quebrou e `sudo painel reparar` refaz o ambiente Python. |
 | Cliente não conecta no SSH (`Permission denied`) | Confirme que a senha está liberada: `sshd -T \| grep -i passwordauth` deve responder `yes`. O instalador ajusta isso, mas um painel de provedor pode sobrescrever. |
 | Painel mostra host errado nos dados do cliente | Rode com `PANEL_PUBLIC_HOST=seu.ip.ou.dominio` ou edite `Environment=PANEL_PUBLIC_HOST=` em `/etc/systemd/system/4pluspainel.service` e rode `painel restart`. |
 
@@ -99,6 +102,8 @@ sudo PANEL_PUBLIC_HOST=vpn.seudominio.com bash install.sh
 | `painel logs` | acompanha o log em tempo real |
 | `painel porta 9000` | troca a porta do painel |
 | `painel senha` | redefine a senha de um administrador |
+| `painel doctor` | diagnostica a instalação (Python, dependências, banco, serviço) |
+| `painel reparar` | recria o ambiente Python quando as dependências quebram |
 | `painel backup` | salva o banco em `/root/4pluspainel-backup-*.tar.gz` |
 | `painel atualizar` | atualiza via git e reinicia |
 | `painel desinstalar` | remove o painel (contas SSH do sistema são preservadas) |
@@ -162,6 +167,12 @@ Dados ficam em `/opt/4pluspainel/data/painel.db`.
   reexibi-las ao revendedor. Mantenha o acesso ao servidor restrito.
 - O painel roda como root (precisa disso para gerenciar usuários do sistema).
   Recomenda-se colocá-lo atrás de um proxy com HTTPS se for exposto à internet.
+
+## Compatibilidade
+
+Testado em Debian 12 (Python 3.11). O `requirements.txt` usa faixas de versão
+em vez de versões fixas, então o pip escolhe o que funciona no Python da sua
+VPS — de **Python 3.8** (Ubuntu 20.04) a 3.12 (Ubuntu 24.04).
 
 ## Desenvolvimento local
 

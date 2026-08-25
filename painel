@@ -66,6 +66,60 @@ else:
 PY
     ok "Senha de '${u}' atualizada."
     ;;
+  doctor|diagnostico)
+    echo
+    echo "${BLUE}${BOLD}  DIAGNÓSTICO DO 4PLUS PAINEL${NC}"
+    echo "  ─────────────────────────────────"
+    py="${INSTALL_DIR}/.venv/bin/python"
+
+    if [[ -x "$py" ]]; then
+      echo "  [OK] Ambiente virtual: $("$py" -V 2>&1)"
+    else
+      echo "  ${RED}[X]${NC} Ambiente virtual ausente em ${INSTALL_DIR}/.venv"
+      echo "       Reinstale com: sudo bash install.sh"
+      exit 1
+    fi
+
+    if "$py" -c 'import fastapi, uvicorn, jinja2, itsdangerous' 2>/dev/null; then
+      echo "  [OK] Dependências: uvicorn $("$py" -c 'import uvicorn;print(uvicorn.__version__)' 2>/dev/null)"
+    else
+      echo "  ${RED}[X]${NC} Dependências faltando ou quebradas."
+      echo "       Corrija com: sudo painel reparar"
+    fi
+
+    if "$py" -c "import sys; sys.path.insert(0,'${INSTALL_DIR}'); import app.main" 2>/tmp/painel_doctor.err; then
+      echo "  [OK] Código do painel carrega corretamente."
+    else
+      echo "  ${RED}[X]${NC} Erro ao carregar o painel:"
+      tail -n 5 /tmp/painel_doctor.err | sed 's/^/       /'
+    fi
+
+    [[ -f "${DATA_DIR}/painel.db" ]] \
+      && echo "  [OK] Banco de dados presente." \
+      || echo "  ${YELLOW}[!]${NC} Banco ainda não criado (normal antes do primeiro acesso)."
+
+    svc_state="$(systemctl is-active "$SERVICE" 2>/dev/null)" || true
+    echo "  Serviço: ${svc_state:-não instalado}"
+    echo "  Porta:   $(panel_port)"
+    echo
+    ;;
+  reparar|repair)
+    need_root
+    info "Recriando o ambiente Python..."
+    [[ -f "${INSTALL_DIR}/requirements.txt" ]] || die "Instalação não encontrada em ${INSTALL_DIR}."
+    pyver="$(python3 -c 'import sys;print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || echo 3)"
+    python3 -c 'import ensurepip' 2>/dev/null || {
+      info "Instalando python${pyver}-venv..."
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "python${pyver}-venv" >/dev/null 2>&1 || true
+    }
+    rm -rf "${INSTALL_DIR}/.venv"
+    python3 -m venv "${INSTALL_DIR}/.venv" || die "Não foi possível criar o ambiente virtual."
+    "${INSTALL_DIR}/.venv/bin/python" -m pip install -q --upgrade pip 2>/dev/null || true
+    "${INSTALL_DIR}/.venv/bin/python" -m pip install -q -r "${INSTALL_DIR}/requirements.txt" \
+      || die "Falha ao instalar as dependências. Verifique a internet da VPS."
+    systemctl restart "$SERVICE" 2>/dev/null || true
+    ok "Ambiente recriado. Rode 'painel doctor' para conferir."
+    ;;
   backup)
     need_root
     dest="/root/4pluspainel-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
@@ -76,7 +130,7 @@ PY
     need_root
     [[ -d "${INSTALL_DIR}/.git" ]] || die "Instalação não veio do git; reinstale com install.sh."
     git -C "$INSTALL_DIR" pull -q
-    "${INSTALL_DIR}/.venv/bin/pip" install -q -r "${INSTALL_DIR}/requirements.txt"
+    "${INSTALL_DIR}/.venv/bin/python" -m pip install -q -r "${INSTALL_DIR}/requirements.txt"
     systemctl restart "$SERVICE"
     ok "Painel atualizado."
     ;;
@@ -111,6 +165,8 @@ PY
     echo "  ${BOLD}painel${NC} logs            acompanhar o log"
     echo "  ${BOLD}painel${NC} porta <numero>  trocar a porta"
     echo "  ${BOLD}painel${NC} senha           trocar senha do admin"
+    echo "  ${BOLD}painel${NC} doctor          diagnosticar a instalação"
+    echo "  ${BOLD}painel${NC} reparar         recriar o ambiente Python"
     echo "  ${BOLD}painel${NC} backup          salvar o banco de dados"
     echo "  ${BOLD}painel${NC} atualizar       atualizar o painel"
     echo "  ${BOLD}painel${NC} desinstalar     remover o painel"
