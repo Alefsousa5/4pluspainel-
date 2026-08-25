@@ -1,0 +1,8 @@
+# Faixas em vez de versões fixas: o pip escolhe a versão mais nova compatível
+# com o Python da VPS. Assim o painel instala tanto no Ubuntu 20.04
+# (Python 3.8) quanto em Debian 12 / Ubuntu 24.04 (Python 3.11+).
+fastapi>=0.100,<1.0
+uvicorn>=0.20,<1.0
+jinja2>=3.0,<4.0
+python-multipart>=0.0.7
+itsdangerous>=2.0,<3.0

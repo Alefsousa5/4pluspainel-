@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% set active = 'dashboard' %}
+{% block title %}Painel — {{ app_name }}{% endblock %}
+{% block heading %}Visão geral{% endblock %}
+
+{% block content %}
+<section class="grid-stats">
+  <div class="stat">
+    <span class="label">Contas SSH</span>
+    <span class="value" id="s-total">{{ stats.total }}</span>
+    <span class="hint">{{ 'todas as revendas' if user.role == 'admin' else 'suas contas' }}</span>
+  </div>
+  <div class="stat ok">
+    <span class="label">Online agora</span>
+    <span class="value" id="s-online">{{ stats.online }}</span>
+    <span class="hint"><span id="s-conn">{{ stats.connections }}</span> conexões ativas</span>
+  </div>
+  <div class="stat warn">
+    <span class="label">Vencendo</span>
+    <span class="value" id="s-soon">{{ stats.expiring_soon }}</span>
+    <span class="hint">nos próximos 3 dias</span>
+  </div>
+  <div class="stat danger">
+    <span class="label">Expiradas</span>
+    <span class="value" id="s-expired">{{ stats.expired }}</span>
+    <span class="hint"><span id="s-locked">{{ stats.locked }}</span> bloqueadas</span>
+  </div>
+</section>
+
+<section class="cols-2">
+  <div class="card">
+    <div class="card-head">
+      <h2>Contas online</h2>
+      <span class="spacer"></span>
+      <a class="btn sm" href="/usuarios">Ver todas</a>
+    </div>
+    {% set online_users = stats.users | selectattr('online', 'greaterthan', 0) | list %}
+    {% if online_users %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Usuário</th><th>Conexões</th><th>Validade</th><th>Revenda</th></tr></thead>
+        <tbody>
+          {% for u in online_users %}
+          <tr>
+            <td class="mono">{{ u.username }}</td>
+            <td><span class="badge {{ 'danger' if u.over_limit else 'ok' }}">{{ u.online }}/{{ u.connection_limit }}</span></td>
+            <td>{{ u.expires_at }} <small class="muted">({{ u.days_left }}d)</small></td>
+            <td class="muted">{{ u.owner_name }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="empty">Nenhuma conta conectada no momento.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h2>Servidor</h2></div>
+    <div class="meter">
+      <div class="meter-top"><span>CPU</span><b id="m-cpu-v">{{ server.cpu_percent }}%</b></div>
+      <div class="bar"><i id="m-cpu" style="width: {{ server.cpu_percent }}%"></i></div>
+    </div>
+    <div class="meter">
+      <div class="meter-top"><span>Memória</span><b id="m-mem-v">{{ server.mem_used_mb }} / {{ server.mem_total_mb }} MB</b></div>
+      <div class="bar"><i id="m-mem" style="width: {{ server.mem_percent }}%"></i></div>
+    </div>
+    <div class="meter">
+      <div class="meter-top"><span>Disco</span><b>{{ server.disk_used_gb }} / {{ server.disk_total_gb }} GB</b></div>
+      <div class="bar"><i style="width: {{ server.disk_percent }}%"></i></div>
+    </div>
+    <div class="info-list">
+      <div><span>Endereço</span><b class="mono">{{ server.address }}</b></div>
+      <div><span>Host</span><b class="mono">{{ server.hostname }}</b></div>
+      <div><span>Sistema</span><b>{{ server.os_name }}</b></div>
+      <div><span>Uptime</span><b id="m-uptime">{{ server.uptime }}</b></div>
+      <div><span>Portas SSH</span><b class="mono">{{ server.ssh_ports | join(', ') }}</b></div>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <h2>Atividade recente</h2>
+    <span class="spacer"></span>
+    <a class="btn sm" href="/logs">Ver registros</a>
+  </div>
+  {% if logs %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Quando</th><th>Quem</th><th>Ação</th><th>Alvo</th></tr></thead>
+      <tbody>
+        {% for log in logs %}
+        <tr>
+          <td class="muted">{{ log.created_at }}</td>
+          <td>{{ log.actor }}</td>
+          <td>{{ log.action }}</td>
+          <td class="mono">{{ log.target }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">Sem atividade registrada ainda.</p>
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function refreshStats() {
+  try {
+    const res = await fetch('/api/stats', { headers: { Accept: 'application/json' } });
+    if (!res.ok) return;
+    const d = await res.json();
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    set('s-total', d.total); set('s-online', d.online); set('s-conn', d.connections);
+    set('s-soon', d.expiring_soon); set('s-expired', d.expired); set('s-locked', d.locked);
+    set('m-cpu-v', d.server.cpu + '%'); set('m-uptime', d.server.uptime);
+    const cpu = document.getElementById('m-cpu');
+    if (cpu) cpu.style.width = d.server.cpu + '%';
+    const mem = document.getElementById('m-mem');
+    if (mem) mem.style.width = d.server.mem + '%';
+  } catch (_) {}
+}
+setInterval(refreshStats, 10000);
+</script>
+{% endblock %}

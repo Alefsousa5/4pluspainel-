@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <span class="brand-mark">4+</span>
+      <div>
+        <strong>{{ app_name }}</strong>
+        <small>v{{ app_version }}</small>
+      </div>
+    </div>
+    <nav>
+      <a href="/" class="{{ 'active' if active == 'dashboard' }}"><span>📊</span> Painel</a>
+      <a href="/usuarios" class="{{ 'active' if active == 'users' }}"><span>👤</span> Contas SSH</a>
+      {% if user.role == 'admin' %}
+      <a href="/revendas" class="{{ 'active' if active == 'resellers' }}"><span>🧩</span> Revendas</a>
+      {% endif %}
+      <a href="/logs" class="{{ 'active' if active == 'logs' }}"><span>📜</span> Registros</a>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="me">
+        <span class="avatar">{{ user.username[0]|upper }}</span>
+        <div>
+          <strong>{{ user.username }}</strong>
+          <small>{{ 'Administrador' if user.role == 'admin' else 'Revendedor' }}</small>
+        </div>
+      </div>
+      <a class="logout" href="/logout">Sair</a>
+    </div>
+  </aside>
+
+  <main class="content">
+    <header class="topbar">
+      <button class="menu-btn" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+      <h1>{% block heading %}{% endblock %}</h1>
+      <div class="topbar-right">
+        {% if demo_mode %}<span class="badge warn" title="O painel não está rodando como root: as contas não são criadas no sistema.">modo demonstração</span>{% endif %}
+        <span class="clock" id="clock"></span>
+      </div>
+    </header>
+    <div class="page">
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+</div>
+
+<div id="toast-wrap"></div>
+
+<div class="modal-backdrop" id="modal-backdrop" onclick="if(event.target===this)closeModal()">
+  <div class="modal" id="modal-box"></div>
+</div>
+
+<script src="/static/app.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

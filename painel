@@ -1,0 +1,508 @@
+#!/usr/bin/env bash
+# 4Plus Painel — utilitário de linha de comando
+set -Eeuo pipefail
+
+INSTALL_DIR="/opt/4pluspainel"
+DATA_DIR="${INSTALL_DIR}/data"
+SERVICE="4pluspainel"
+
+RED=$'\e[1;31m'; GREEN=$'\e[1;32m'; YELLOW=$'\e[1;33m'; BLUE=$'\e[1;36m'; BOLD=$'\e[1m'; NC=$'\e[0m'
+ok()   { echo "${GREEN}[✓]${NC} $*"; }
+info() { echo "${BLUE}[*]${NC} $*"; }
+die()  { echo "${RED}[x]${NC} $*" >&2; exit 1; }
+
+need_root() { [[ $EUID -eq 0 ]] || die "Execute como root (sudo painel $*)"; }
+
+# Leitura que nao aborta quando nao ha terminal (script rodado via pipe/cron).
+TTY_IN=""
+if [[ -t 0 ]]; then TTY_IN="/dev/stdin"
+elif [[ -r /dev/tty ]] && : 2>/dev/null >/dev/tty; then TTY_IN="/dev/tty"; fi
+
+ask() {  # ask <var> <prompt> <padrao>
+  local __v="$1" __p="$2" __d="$3" __r=""
+  if [[ -z "$TTY_IN" ]]; then printf -v "$__v" '%s' "$__d"; return 0; fi
+  read -rp "$__p" __r <"$TTY_IN" || __r=""
+  printf -v "$__v" '%s' "${__r:-$__d}"
+}
+ask_secret() {  # ask_secret <var> <prompt>
+  local __v="$1" __p="$2" __r=""
+  if [[ -z "$TTY_IN" ]]; then printf -v "$__v" '%s' ""; return 0; fi
+  read -rsp "$__p" __r <"$TTY_IN" || __r=""
+  echo
+  printf -v "$__v" '%s' "$__r"
+}
+
+panel_port() {
+  grep -oP 'PANEL_PORT=\K[0-9]+' "/etc/systemd/system/${SERVICE}.service" 2>/dev/null || echo 8080
+}
+
+# --------------------------------------------------------------------------- #
+# Menu interativo
+# --------------------------------------------------------------------------- #
+PY_BIN="${INSTALL_DIR}/.venv/bin/python"
+
+# Executa um comando do backend Python (mesmas regras da interface web).
+pycli() {
+  [[ -x "$PY_BIN" ]] || die "Painel não instalado em ${INSTALL_DIR}. Rode: sudo bash install.sh"
+  ( cd "$INSTALL_DIR" && PANEL_DATA_DIR="$DATA_DIR" "$PY_BIN" -m app.cli "$@" )
+}
+
+pausar() {
+  [[ -z "$TTY_IN" ]] && return 0
+  echo
+  read -rp "  Pressione ENTER para voltar ao menu..." _ <"$TTY_IN" || true
+}
+
+cabecalho() {
+  clear 2>/dev/null || true
+  local estado port ip
+  estado="$(systemctl is-active "$SERVICE" 2>/dev/null)" || true
+  case "$estado" in
+    active)     estado="${GREEN}ativo${NC}" ;;
+    activating) estado="${YELLOW}reiniciando${NC}" ;;
+    *)          estado="${RED}${estado:-parado}${NC}" ;;
+  esac
+  port="$(panel_port)"
+  ip="$(cat "${INSTALL_DIR}/.ip_cache" 2>/dev/null || true)"
+  if [[ -z "$ip" ]]; then
+    ip="$(curl -s --max-time 3 https://api.ipify.org 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')"
+    [[ -n "$ip" ]] && echo "$ip" > "${INSTALL_DIR}/.ip_cache" 2>/dev/null || true
+  fi
+  echo
+  echo "${BLUE}${BOLD}  ╔════════════════════════════════════════════════╗${NC}"
+  echo "${BLUE}${BOLD}  ║              4 P L U S   P A I N E L           ║${NC}"
+  echo "${BLUE}${BOLD}  ╚════════════════════════════════════════════════╝${NC}"
+  echo "   Painel: ${BOLD}http://${ip}:${port}${NC}   Serviço: ${estado}"
+  echo "  ──────────────────────────────────────────────────"
+}
+
+menu_contas() {
+  while true; do
+    cabecalho
+    echo "   ${BOLD}CONTAS SSH${NC}"
+    echo
+    echo "     ${GREEN}1${NC}  Listar contas"
+    echo "     ${GREEN}2${NC}  Criar conta"
+    echo "     ${GREEN}3${NC}  Remover conta"
+    echo "     ${GREEN}4${NC}  Renovar conta"
+    echo "     ${GREEN}5${NC}  Bloquear / desbloquear"
+    echo "     ${GREEN}6${NC}  Derrubar sessões"
+    echo "     ${GREEN}7${NC}  Ver quem está online"
+    echo
+    echo "     ${YELLOW}0${NC}  Voltar"
+    echo "  ──────────────────────────────────────────────────"
+    ask op "   Opção: " ""
+    case "$op" in
+      1) pycli listar; pausar ;;
+      2) criar_conta_interativo; pausar ;;
+      3) acao_em_conta remover; pausar ;;
+      4) acao_em_conta renovar; pausar ;;
+      5) acao_em_conta bloquear; pausar ;;
+      6) acao_em_conta derrubar; pausar ;;
+      7) pycli online; pausar ;;
+      0|"") return ;;
+      *) echo "   ${RED}Opção inválida.${NC}"; sleep 1 ;;
+    esac
+  done
+}
+
+criar_conta_interativo() {
+  echo
+  ask nome "   Nome de usuário: " ""
+  if [[ -z "$nome" ]]; then echo "   ${RED}Nome obrigatório.${NC}"; return; fi
+
+  local sugestao; sugestao="$(pycli gerar-senha 2>/dev/null | tr -d '\r\n')"
+  ask senha "   Senha [${sugestao}]: " "$sugestao"
+  ask limite "   Limite de conexões [1]: " "1"
+  ask dias "   Validade em dias [30]: " "30"
+  ask nota "   Observação (opcional): " ""
+
+  pycli criar "$nome" "$senha" "$limite" "$dias" "$nota"
+}
+
+acao_em_conta() {
+  local acao="$1"
+  pycli listar || return
+  local n
+  ask n "   Número da conta (0 cancela): " "0"
+  [[ "$n" == "0" || -z "$n" ]] && return
+  if ! [[ "$n" =~ ^[0-9]+$ ]]; then echo "   ${RED}Informe um número.${NC}"; return; fi
+
+  case "$acao" in
+    remover)
+      local c; ask c "   ${YELLOW}Confirma a exclusão? [s/N]: ${NC}" "n"
+      [[ "${c,,}" == "s" ]] || { echo "   Cancelado."; return; }
+      pycli remover "$n" ;;
+    renovar)
+      local d; ask d "   Dias a adicionar [30]: " "30"
+      pycli renovar "$n" "$d" ;;
+    bloquear) pycli bloquear "$n" ;;
+    derrubar) pycli derrubar "$n" ;;
+  esac
+}
+
+menu_servico() {
+  while true; do
+    cabecalho
+    echo "   ${BOLD}SERVIÇO E CONFIGURAÇÕES${NC}"
+    echo
+    echo "     ${GREEN}1${NC}  Ver status"
+    echo "     ${GREEN}2${NC}  Reiniciar painel"
+    echo "     ${GREEN}3${NC}  Parar painel"
+    echo "     ${GREEN}4${NC}  Iniciar painel"
+    echo "     ${GREEN}5${NC}  Trocar porta"
+    echo "     ${GREEN}6${NC}  Trocar senha do administrador"
+    echo "     ${GREEN}7${NC}  Ver dados de acesso (IP, usuário, senha)"
+    echo "     ${GREEN}8${NC}  Ver log em tempo real"
+    echo
+    echo "     ${YELLOW}0${NC}  Voltar"
+    echo "  ──────────────────────────────────────────────────"
+    ask op "   Opção: " ""
+    case "$op" in
+      1) systemctl status "$SERVICE" --no-pager 2>&1 | head -14; pausar ;;
+      2) systemctl restart "$SERVICE" && ok "Painel reiniciado."; pausar ;;
+      3) systemctl stop "$SERVICE" && ok "Painel parado."; pausar ;;
+      4) systemctl start "$SERVICE" && ok "Painel iniciado."; pausar ;;
+      5) local p; ask p "   Nova porta: " ""
+         [[ -n "$p" ]] && "$0" porta "$p"; pausar ;;
+      6) "$0" senha; pausar ;;
+      7) "$0" acesso; pausar ;;
+      8) echo "   (Ctrl+C para sair do log)"; sleep 1; journalctl -u "$SERVICE" -f --no-pager || true ;;
+      0|"") return ;;
+      *) echo "   ${RED}Opção inválida.${NC}"; sleep 1 ;;
+    esac
+  done
+}
+
+menu_manutencao() {
+  while true; do
+    cabecalho
+    echo "   ${BOLD}MANUTENÇÃO${NC}"
+    echo
+    echo "     ${GREEN}1${NC}  Diagnóstico (doctor)"
+    echo "     ${GREEN}2${NC}  Reparar ambiente Python"
+    echo "     ${GREEN}3${NC}  Gerar relatório de suporte"
+    echo "     ${GREEN}4${NC}  Backup do banco de dados"
+    echo "     ${GREEN}5${NC}  Atualizar painel"
+    echo "     ${RED}6${NC}  Desinstalar painel"
+    echo
+    echo "     ${YELLOW}0${NC}  Voltar"
+    echo "  ──────────────────────────────────────────────────"
+    ask op "   Opção: " ""
+    case "$op" in
+      1) "$0" doctor; pausar ;;
+      2) "$0" reparar; pausar ;;
+      3) "$0" relatorio; pausar ;;
+      4) "$0" backup; pausar ;;
+      5) "$0" atualizar; pausar ;;
+      6) "$0" desinstalar; pausar ;;
+      0|"") return ;;
+      *) echo "   ${RED}Opção inválida.${NC}"; sleep 1 ;;
+    esac
+  done
+}
+
+menu_principal() {
+  [[ -n "$TTY_IN" ]] || die "O menu precisa de um terminal interativo. Use 'painel ajuda' para ver os comandos."
+  while true; do
+    cabecalho
+    pycli resumo 2>/dev/null || true
+    echo "     ${GREEN}1${NC}  Contas SSH"
+    echo "     ${GREEN}2${NC}  Serviço e configurações"
+    echo "     ${GREEN}3${NC}  Manutenção"
+    echo
+    echo "     ${YELLOW}0${NC}  Sair"
+    echo "  ──────────────────────────────────────────────────"
+    ask op "   Opção: " ""
+    case "$op" in
+      1) menu_contas ;;
+      2) menu_servico ;;
+      3) menu_manutencao ;;
+      0|"") clear 2>/dev/null || true; exit 0 ;;
+      *) echo "   ${RED}Opção inválida.${NC}"; sleep 1 ;;
+    esac
+  done
+}
+
+case "${1:-menu}" in
+  menu|"")
+    need_root
+    menu_principal
+    ;;
+  status)
+    systemctl status "$SERVICE" --no-pager || true
+    ;;
+  start)
+    need_root; systemctl start "$SERVICE"; ok "Painel iniciado."
+    ;;
+  stop)
+    need_root; systemctl stop "$SERVICE"; ok "Painel parado."
+    ;;
+  restart|reiniciar)
+    need_root; systemctl restart "$SERVICE"; ok "Painel reiniciado."
+    ;;
+  logs|log)
+    journalctl -u "$SERVICE" -f --no-pager
+    ;;
+  porta)
+    need_root
+    novo="${2:-}"
+    [[ "$novo" =~ ^[0-9]+$ ]] || die "Uso: painel porta <numero>"
+    sed -i "s/PANEL_PORT=.*/PANEL_PORT=${novo}/" "/etc/systemd/system/${SERVICE}.service"
+    sed -i "s/--port [0-9]*/--port ${novo}/" "/etc/systemd/system/${SERVICE}.service"
+    systemctl daemon-reload && systemctl restart "$SERVICE"
+    command -v ufw >/dev/null && ufw allow "${novo}/tcp" >/dev/null 2>&1 || true
+    ok "Painel agora na porta ${novo}."
+    ;;
+  senha)
+    need_root
+    [[ -n "$TTY_IN" ]] || die "Este comando precisa de um terminal interativo."
+    ask u "Usuário do painel [admin]: " "admin"
+    ask_secret p "Nova senha: "
+    [[ ${#p} -ge 4 ]] || die "A senha precisa ter ao menos 4 caracteres."
+    PANEL_DATA_DIR="$DATA_DIR" "${INSTALL_DIR}/.venv/bin/python" - "$INSTALL_DIR" "$u" "$p" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+from app.database import init_db, execute, query_one, now
+from app.security import hash_password
+u, p = sys.argv[2], sys.argv[3]
+init_db()
+row = query_one("SELECT id FROM admins WHERE username = ?", (u,))
+if row:
+    execute("UPDATE admins SET password_hash = ?, active = 1 WHERE id = ?", (hash_password(p), row["id"]))
+    print("senha alterada")
+else:
+    execute("INSERT INTO admins (username, password_hash, role, user_limit, active, created_at)"
+            " VALUES (?, ?, 'admin', 0, 1, ?)", (u, hash_password(p), now()))
+    print("administrador criado")
+PY
+    # Mantém o arquivo de credenciais em dia com a nova senha.
+    f="${INSTALL_DIR}/acesso.txt"
+    ip="$(curl -s --max-time 4 https://api.ipify.org 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')"
+    cat > "$f" <<EOF
+===== 4Plus Painel — dados de acesso =====
+Atualizado em: $(date '+%d/%m/%Y %H:%M:%S')
+
+Endereço : http://${ip}:$(panel_port)
+Usuário  : ${u}
+Senha    : ${p}
+
+Trocar a senha : sudo painel senha
+Ver este arquivo: sudo painel acesso
+==========================================
+EOF
+    chmod 600 "$f" 2>/dev/null || true
+    ok "Senha de '${u}' atualizada."
+    ;;
+  doctor|diagnostico)
+    echo
+    echo "${BLUE}${BOLD}  DIAGNÓSTICO DO 4PLUS PAINEL${NC}"
+    echo "  ─────────────────────────────────"
+    py="${INSTALL_DIR}/.venv/bin/python"
+
+    if [[ -x "$py" ]]; then
+      echo "  [OK] Ambiente virtual: $("$py" -V 2>&1)"
+    else
+      echo "  ${RED}[X]${NC} Ambiente virtual ausente em ${INSTALL_DIR}/.venv"
+      echo "       Reinstale com: sudo bash install.sh"
+      exit 1
+    fi
+
+    if "$py" -c 'import fastapi, uvicorn, jinja2, itsdangerous' 2>/dev/null; then
+      echo "  [OK] Dependências: uvicorn $("$py" -c 'import uvicorn;print(uvicorn.__version__)' 2>/dev/null)"
+    else
+      echo "  ${RED}[X]${NC} Dependências faltando ou quebradas."
+      echo "       Corrija com: sudo painel reparar"
+    fi
+
+    if "$py" -c "import sys; sys.path.insert(0,'${INSTALL_DIR}'); import app.main" 2>/tmp/painel_doctor.err; then
+      echo "  [OK] Código do painel carrega corretamente."
+    else
+      echo "  ${RED}[X]${NC} Erro ao carregar o painel:"
+      tail -n 5 /tmp/painel_doctor.err | sed 's/^/       /'
+    fi
+
+    [[ -f "${DATA_DIR}/painel.db" ]] \
+      && echo "  [OK] Banco de dados presente." \
+      || echo "  ${YELLOW}[!]${NC} Banco ainda não criado (normal antes do primeiro acesso)."
+
+    svc_state="$(systemctl is-active "$SERVICE" 2>/dev/null)" || true
+    nrest="$(systemctl show "$SERVICE" -p NRestarts --value 2>/dev/null)" || true
+    case "$svc_state" in
+      active)
+        echo "  [OK] Serviço ativo (reinícios: ${nrest:-0})"
+        ;;
+      activating)
+        echo "  ${RED}[X]${NC} Serviço em loop de reinício (${nrest:-?} tentativas)."
+        echo "       O painel está caindo logo após iniciar. Causa provável:"
+        causa="$(journalctl -u "$SERVICE" -n 60 --no-pager 2>/dev/null \
+                 | grep -iE "error|address already in use|no module|traceback|permission denied" \
+                 | tail -3)"
+        if [[ -n "$causa" ]]; then
+          echo "$causa" | sed 's/^.*]: /       /'
+        else
+          echo "       (não identificada — veja 'painel logs')"
+        fi
+        echo "       Veja tudo com: painel logs"
+        ;;
+      failed)
+        echo "  ${RED}[X]${NC} Serviço falhou. Veja: painel logs"
+        ;;
+      *)
+        echo "  ${YELLOW}[!]${NC} Serviço: ${svc_state:-não instalado}"
+        ;;
+    esac
+
+    port="$(panel_port)"
+    if curl -fsS --max-time 3 "http://127.0.0.1:${port}/health" >/dev/null 2>&1; then
+      echo "  [OK] Respondendo em http://127.0.0.1:${port}"
+    else
+      echo "  ${YELLOW}[!]${NC} Não respondeu na porta ${port}."
+    fi
+    echo "  Porta:   $(panel_port)"
+    echo
+    ;;
+  reparar|repair)
+    need_root
+    info "Recriando o ambiente Python..."
+    [[ -f "${INSTALL_DIR}/requirements.txt" ]] || die "Instalação não encontrada em ${INSTALL_DIR}."
+    pyver="$(python3 -c 'import sys;print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || echo 3)"
+    python3 -c 'import ensurepip' 2>/dev/null || {
+      info "Instalando python${pyver}-venv..."
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "python${pyver}-venv" >/dev/null 2>&1 || true
+    }
+    rm -rf "${INSTALL_DIR}/.venv"
+    python3 -m venv "${INSTALL_DIR}/.venv" || die "Não foi possível criar o ambiente virtual."
+    "${INSTALL_DIR}/.venv/bin/python" -m pip install -q --upgrade pip 2>/dev/null || true
+    "${INSTALL_DIR}/.venv/bin/python" -m pip install -q -r "${INSTALL_DIR}/requirements.txt" \
+      || die "Falha ao instalar as dependências. Verifique a internet da VPS."
+    systemctl restart "$SERVICE" 2>/dev/null || true
+    ok "Ambiente recriado. Rode 'painel doctor' para conferir."
+    ;;
+  acesso|credenciais)
+    need_root
+    f="${INSTALL_DIR}/acesso.txt"
+    port="$(panel_port)"
+    ip="$(curl -s --max-time 4 https://api.ipify.org 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')"
+    echo
+    if [[ -f "$f" ]]; then
+      cat "$f"
+      echo
+      echo "  ${YELLOW}Se o IP acima estiver desatualizado, use:${NC} http://${ip}:${port}"
+    else
+      echo "  ${YELLOW}[!]${NC} Arquivo de credenciais não encontrado."
+      echo "      Endereço do painel: http://${ip}:${port}"
+      echo "      Para definir uma nova senha: sudo painel senha"
+    fi
+    echo
+    ;;
+  relatorio|report)
+    # Junta tudo o que é preciso para diagnosticar a instalação.
+    out="/tmp/4pluspainel-relatorio-$(date +%Y%m%d-%H%M%S).txt"
+    {
+      echo "===== RELATÓRIO 4PLUS PAINEL ====="
+      echo "data     : $(date '+%Y-%m-%d %H:%M:%S')"
+      echo "sistema  : $(. /etc/os-release 2>/dev/null && echo "${PRETTY_NAME:-?}")"
+      echo "kernel   : $(uname -srm)"
+      echo "python   : $(python3 -V 2>&1)"
+      echo "disco    : $(df -h / 2>/dev/null | awk 'NR==2{print $4" livre de "$2}')"
+      echo "memoria  : $(free -m 2>/dev/null | awk '/Mem:/{print $7"MB de "$2"MB"}')"
+      echo
+      echo "--- venv ---"
+      if [[ -x "${INSTALL_DIR}/.venv/bin/python" ]]; then
+        "${INSTALL_DIR}/.venv/bin/python" -V 2>&1
+        "${INSTALL_DIR}/.venv/bin/python" -m pip list 2>/dev/null | grep -iE "fastapi|uvicorn|jinja|itsdanger|multipart|pydantic|starlette"
+        echo "-- importa o painel? --"
+        (cd "$INSTALL_DIR" && "${INSTALL_DIR}/.venv/bin/python" -c "import app.main; print('import OK')" 2>&1 | tail -12)
+      else
+        echo "AUSENTE em ${INSTALL_DIR}/.venv"
+      fi
+      echo
+      echo "--- serviço ---"
+      systemctl is-active "$SERVICE" 2>&1
+      systemctl is-enabled "$SERVICE" 2>&1
+      systemctl show "$SERVICE" -p NRestarts 2>/dev/null
+      echo
+      echo "--- unit ---"
+      cat "/etc/systemd/system/${SERVICE}.service" 2>&1
+      echo
+      echo "--- últimas 60 linhas do log do serviço ---"
+      journalctl -u "$SERVICE" -n 60 --no-pager 2>&1
+      echo
+      echo "--- porta ---"
+      p="$(panel_port)"; echo "configurada: $p"
+      (ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null) | grep ":${p}" || echo "nada ouvindo em $p"
+      echo "curl local: $(curl -s -o /dev/null -w '%{http_code}' -m 5 "http://127.0.0.1:${p}/health" 2>&1)"
+      echo
+      echo "--- SSH ---"
+      (sshd -T 2>/dev/null || /usr/sbin/sshd -T 2>/dev/null) | grep -iE "^(port|passwordauthentication)" || echo "sshd -T indisponível"
+      echo
+      echo "--- log de instalação (últimas 40 linhas) ---"
+      tail -n 40 /var/log/4pluspainel-install.log 2>/dev/null \
+        || tail -n 40 /tmp/4pluspainel-install.log 2>/dev/null \
+        || echo "sem log de instalação"
+    } > "$out" 2>&1
+    # Remove senhas que possam ter entrado no relatório.
+    sed -i -E 's/(senha|password|pass)[[:space:]]*[:=][[:space:]]*[^[:space:]]+/\1: ***/Ig' "$out"
+    ok "Relatório salvo em: ${out}"
+    echo "  Envie esse arquivo para análise. Ver agora: cat ${out}"
+    ;;
+  backup)
+    need_root
+    dest="/root/4pluspainel-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
+    tar -czf "$dest" -C "$INSTALL_DIR" data
+    ok "Backup salvo em ${dest}"
+    ;;
+  atualizar|update)
+    need_root
+    [[ -d "${INSTALL_DIR}/.git" ]] || die "Instalação não veio do git; reinstale com install.sh."
+    git -C "$INSTALL_DIR" pull -q
+    "${INSTALL_DIR}/.venv/bin/python" -m pip install -q -r "${INSTALL_DIR}/requirements.txt"
+    systemctl restart "$SERVICE"
+    ok "Painel atualizado."
+    ;;
+  desinstalar|uninstall)
+    need_root
+    ask c "${YELLOW}Remover o painel? As contas SSH no sistema NÃO são apagadas. [s/N]: ${NC}" "n"
+    [[ "${c,,}" == "s" ]] || { echo "Cancelado."; exit 0; }
+    systemctl disable --now "$SERVICE" 2>/dev/null || true
+    rm -f "/etc/systemd/system/${SERVICE}.service" /usr/local/bin/painel
+    systemctl daemon-reload
+    ask d "Apagar também os dados (${DATA_DIR})? [s/N]: " "n"
+    if [[ "${d,,}" == "s" ]]; then rm -rf "$INSTALL_DIR"; else rm -rf "${INSTALL_DIR}/app" "${INSTALL_DIR}/.venv"; fi
+    ok "Painel removido."
+    ;;
+  info|ajuda|help)
+    port="$(panel_port)"
+    ip="$(curl -s --max-time 4 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')"
+    estado="$(systemctl is-active "$SERVICE" 2>/dev/null)" || true
+    case "$estado" in
+      active)   estado="ativo" ;;
+      inactive) estado="parado" ;;
+      failed)   estado="com falha" ;;
+      "")       estado="não instalado" ;;
+    esac
+    echo
+    echo "${BLUE}${BOLD}  4PLUS PAINEL${NC}"
+    echo "  ─────────────────────────────────"
+    echo "  Estado:  ${estado}"
+    echo "  Acesso:  http://${ip}:${port}"
+    echo
+    echo "  ${BOLD}painel${NC}                 abre o MENU interativo"
+    echo "  ${BOLD}painel${NC} status | start | stop | restart"
+    echo "  ${BOLD}painel${NC} logs            acompanhar o log"
+    echo "  ${BOLD}painel${NC} porta <numero>  trocar a porta"
+    echo "  ${BOLD}painel${NC} acesso          mostrar IP, usuário e senha"
+    echo "  ${BOLD}painel${NC} senha           trocar senha do admin"
+    echo "  ${BOLD}painel${NC} doctor          diagnosticar a instalação"
+    echo "  ${BOLD}painel${NC} reparar         recriar o ambiente Python"
+    echo "  ${BOLD}painel${NC} relatorio       gerar relatório para diagnóstico"
+    echo "  ${BOLD}painel${NC} backup          salvar o banco de dados"
+    echo "  ${BOLD}painel${NC} atualizar       atualizar o painel"
+    echo "  ${BOLD}painel${NC} desinstalar     remover o painel"
+    echo
+    ;;
+  *)
+    die "Comando desconhecido: $1  (rode 'painel' para ver as opções)"
+    ;;
+esac

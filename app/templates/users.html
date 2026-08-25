@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+{% set active = 'users' %}
+{% block title %}Contas SSH — {{ app_name }}{% endblock %}
+{% block heading %}Contas SSH{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-head">
+    <h2>{{ users | length }} conta(s)</h2>
+    <span class="spacer"></span>
+    <button class="btn primary" onclick="newUserModal()">+ Nova conta</button>
+  </div>
+
+  <form class="filters" method="get" action="/usuarios">
+    <label>Buscar
+      <input type="search" name="q" value="{{ q }}" placeholder="usuário, nota ou whatsapp">
+    </label>
+    <label>Status
+      <select name="status">
+        <option value="">Todos</option>
+        {% for s in ['online', 'ativo', 'expirado', 'bloqueado'] %}
+        <option value="{{ s }}" {{ 'selected' if status == s }}>{{ s|capitalize }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button class="btn" type="submit">Filtrar</button>
+    {% if q or status %}<a class="btn ghost" href="/usuarios">Limpar</a>{% endif %}
+  </form>
+</section>
+
+<section class="card">
+  {% if users %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Usuário</th><th>Senha</th><th>Conexões</th><th>Validade</th>
+          <th>Status</th>{% if user.role == 'admin' %}<th>Revenda</th>{% endif %}<th>Ações</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td>
+            <b class="mono">{{ u.username }}</b>
+            {% if u.note %}<br><small class="muted">{{ u.note }}</small>{% endif %}
+          </td>
+          <td>
+            <span class="mono">{{ u.password }}</span>
+            <button class="btn sm ghost" title="Copiar dados de acesso"
+              onclick='copyCredentials({{ u | tojson }})'>📋</button>
+          </td>
+          <td><span class="badge {{ 'danger' if u.over_limit else ('ok' if u.online else '') }}">{{ u.online }}/{{ u.connection_limit }}</span></td>
+          <td>
+            {{ u.expires_at }}<br>
+            <small class="muted">{{ u.days_left }} dia(s)</small>
+          </td>
+          <td><span class="badge {{ u.status }}">{{ u.status }}</span></td>
+          {% if user.role == 'admin' %}<td class="muted">{{ u.owner_name }}</td>{% endif %}
+          <td class="actions">
+            <button class="btn sm" onclick='editUserModal({{ u | tojson }})'>Editar</button>
+            <button class="btn sm" onclick='renewModal({{ u.id }}, "{{ u.username }}")'>Renovar</button>
+            <button class="btn sm" onclick='confirmAction("{{ "Desbloquear" if u.locked else "Bloquear" }} a conta {{ u.username }}?", "/api/users/{{ u.id }}/lock")'>{{ 'Desbloquear' if u.locked else 'Bloquear' }}</button>
+            {% if u.online %}
+            <button class="btn sm" onclick='confirmAction("Derrubar as sessões de {{ u.username }}?", "/api/users/{{ u.id }}/kick")'>Derrubar</button>
+            {% endif %}
+            <button class="btn sm danger" onclick='confirmAction("Excluir definitivamente a conta {{ u.username }}?", "/api/users/{{ u.id }}/delete")'>Excluir</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">Nenhuma conta encontrada.<br><br>
+    <button class="btn primary" onclick="newUserModal()">Criar a primeira conta</button>
+  </p>
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const SERVER = {
+  host: {{ server.address | tojson }},
+  ports: {{ server.ssh_ports | tojson }},
+};
+const SUGGESTED = {{ suggested_password | tojson }};
+
+function credentialsText(u) {
+  return [
+    `Usuário: ${u.username}`,
+    `Senha: ${u.password}`,
+    `Host: ${SERVER.host}`,
+    `Porta: ${SERVER.ports.join(', ')}`,
+    `Validade: ${u.expires_at}`,
+  ].join('\n');
+}
+
+function copyCredentials(u) {
+  copyText(credentialsText(u), 'Dados de acesso copiados!');
+}
+
+function newUserModal() {
+  openModal(`
+    <h3>Nova conta SSH</h3>
+    <p class="sub">A conta é criada no sistema operacional e liberada para conexão SSH.</p>
+    <form onsubmit="return submitModal(this, '/api/users', { onSuccess: showCredentials })">
+      <label>Usuário
+        <input name="username" required pattern="[a-z_][a-z0-9_-]{2,31}"
+               title="3 a 32 caracteres: letras minúsculas, números, hífen e underline" placeholder="ex: cliente01">
+      </label>
+      <label>Senha
+        <span class="pw-field">
+          <input name="password" id="np" required value="${SUGGESTED}">
+          <button type="button" class="btn" onclick="suggestPassword('np')">🎲</button>
+        </span>
+      </label>
+      <div class="row-2">
+        <label>Limite de conexões
+          <input type="number" name="connection_limit" value="1" min="1" max="999" required>
+        </label>
+        <label>Validade (dias)
+          <input type="number" name="days" value="30" min="1" max="3650" required>
+        </label>
+      </div>
+      <div class="row-2">
+        <label>WhatsApp <input name="whatsapp" placeholder="opcional"></label>
+        <label>Observação <input name="note" placeholder="opcional"></label>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" onclick="closeModal()">Cancelar</button>
+        <button type="submit" class="btn primary">Criar conta</button>
+      </div>
+    </form>
+  `);
+}
+
+function showCredentials(json) {
+  const u = json.user;
+  const text = credentialsText(u);
+  openModal(`
+    <h3>✅ Conta criada</h3>
+    <p class="sub">Envie os dados abaixo para o cliente.</p>
+    <div class="result-box">
+      <div><span>Usuário</span><b>${esc(u.username)}</b></div>
+      <div><span>Senha</span><b>${esc(u.password)}</b></div>
+      <div><span>Host</span><b>${SERVER.host}</b></div>
+      <div><span>Porta</span><b>${SERVER.ports.join(', ')}</b></div>
+      <div><span>Validade</span><b>${esc(u.expires_at)}</b></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick='copyText(${JSON.stringify(text)}, "Dados copiados!")'>📋 Copiar</button>
+      <button class="btn primary" onclick="location.reload()">Concluir</button>
+    </div>
+  `);
+}
+
+function editUserModal(u) {
+  openModal(`
+    <h3>Editar ${esc(u.username)}</h3>
+    <p class="sub">Deixe a senha em branco para mantê-la. Validade 0 mantém a data atual (${esc(u.expires_at)}).</p>
+    <form onsubmit="return submitModal(this, '/api/users/${u.id}')">
+      <label>Nova senha
+        <span class="pw-field">
+          <input name="password" id="ep" placeholder="manter a atual">
+          <button type="button" class="btn" onclick="suggestPassword('ep')">🎲</button>
+        </span>
+      </label>
+      <div class="row-2">
+        <label>Limite de conexões
+          <input type="number" name="connection_limit" value="${u.connection_limit}" min="1" max="999" required>
+        </label>
+        <label>Nova validade (dias)
+          <input type="number" name="days" value="0" min="0" max="3650">
+        </label>
+      </div>
+      <div class="row-2">
+        <label>WhatsApp <input name="whatsapp" value="${esc(u.whatsapp)}"></label>
+        <label>Observação <input name="note" value="${esc(u.note)}"></label>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" onclick="closeModal()">Cancelar</button>
+        <button type="submit" class="btn primary">Salvar</button>
+      </div>
+    </form>
+  `);
+}
+
+function renewModal(id, username) {
+  openModal(`
+    <h3>Renovar ${esc(username)}</h3>
+    <p class="sub">Os dias são somados à validade atual (ou a partir de hoje, se já expirou).</p>
+    <form onsubmit="return submitModal(this, '/api/users/${id}/renew')">
+      <label>Dias a adicionar
+        <input type="number" name="days" value="30" min="1" max="3650" required>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" onclick="closeModal()">Cancelar</button>
+        <button type="submit" class="btn primary">Renovar</button>
+      </div>
+    </form>
+  `);
+}
+</script>
+{% endblock %}
