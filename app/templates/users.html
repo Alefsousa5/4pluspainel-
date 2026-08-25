@@ -82,7 +82,7 @@
 {% block scripts %}
 <script>
 const SERVER = {
-  host: {{ server.hostname | tojson }},
+  host: {{ server.address | tojson }},
   ports: {{ server.ssh_ports | tojson }},
 };
 const SUGGESTED = {{ suggested_password | tojson }};

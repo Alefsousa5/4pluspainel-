@@ -153,8 +153,63 @@ def kill_sessions(username: str) -> int:
 # --------------------------------------------------------------------------- #
 # Conexões ativas
 # --------------------------------------------------------------------------- #
+# Processos que representam uma sessão de acesso remoto.
+_SESSION_COMMS = {"sshd", "dropbear", "sshd-session"}
+
+
+def _proc_comm(pid: str) -> str:
+    try:
+        with open(f"/proc/{pid}/comm") as fh:
+            return fh.read().strip()
+    except (OSError, ValueError):
+        return ""
+
+
+def _proc_start_time(pid: int) -> float:
+    """Momento de início do processo (jiffies desde o boot). 0 se indisponível."""
+    try:
+        with open(f"/proc/{pid}/stat") as fh:
+            data = fh.read()
+        # o campo 22 (starttime) vem após o nome do comando, que pode ter espaços
+        return float(data.rpartition(")")[2].split()[19])
+    except (OSError, ValueError, IndexError):
+        return 0.0
+
+
+def _scan_sessions(uid_map: dict[int, str]) -> dict[str, list[int]]:
+    """Varre /proc uma única vez e devolve as sessões SSH por usuário.
+
+    Conta apenas processos de sessão (sshd/dropbear); processos comuns do
+    usuário não inflam o número de conexões.
+    """
+    found: dict[str, list[int]] = {name: [] for name in uid_map.values()}
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        try:
+            uid = os.stat(f"/proc/{entry}").st_uid
+        except (FileNotFoundError, PermissionError, ProcessLookupError):
+            continue
+        name = uid_map.get(uid)
+        if not name:
+            continue
+        if _proc_comm(entry) in _SESSION_COMMS:
+            found[name].append(int(entry))
+    return found
+
+
+def _uid_map(usernames: list[str]) -> dict[int, str]:
+    mapping: dict[int, str] = {}
+    for name in usernames:
+        try:
+            mapping[pwd.getpwnam(name).pw_uid] = name
+        except KeyError:
+            continue
+    return mapping
+
+
 def list_pids(username: str) -> list[int]:
-    """PIDs de processos pertencentes ao usuário (sessões sshd/dropbear)."""
+    """Todos os PIDs do usuário — usado ao derrubar/remover a conta."""
     if config.DEMO_MODE:
         return []
     try:
@@ -173,33 +228,48 @@ def list_pids(username: str) -> list[int]:
     return pids
 
 
+def list_sessions(username: str) -> list[int]:
+    """PIDs das sessões SSH ativas do usuário, da mais antiga para a mais nova."""
+    if config.DEMO_MODE:
+        return []
+    pids = _scan_sessions(_uid_map([username])).get(username, [])
+    return sorted(pids, key=_proc_start_time)
+
+
 def count_connections(username: str) -> int:
     """Número de sessões SSH abertas pelo usuário."""
-    return len(list_pids(username))
+    return len(list_sessions(username))
 
 
 def connections_map(usernames: list[str]) -> dict[str, int]:
     """Contagem de conexões para vários usuários de uma vez (uma varredura)."""
     if config.DEMO_MODE:
         return {u: 0 for u in usernames}
-    uid_map: dict[int, str] = {}
-    for name in usernames:
+    sessions = _scan_sessions(_uid_map(usernames))
+    return {name: len(sessions.get(name, [])) for name in usernames}
+
+
+def kill_excess_sessions(username: str, limit: int) -> int:
+    """Encerra apenas as sessões que passam do limite.
+
+    Mantém as `limit` conexões mais antigas (já estabelecidas) e derruba as
+    mais recentes, para não desconectar o cliente por inteiro.
+    """
+    _guard(username)
+    if limit < 1:
+        return kill_sessions(username)
+    sessions = list_sessions(username)
+    excess = sessions[limit:]
+    if config.DEMO_MODE or not excess:
+        return len(excess)
+    killed = 0
+    for pid in excess:
         try:
-            uid_map[pwd.getpwnam(name).pw_uid] = name
-        except KeyError:
+            os.kill(pid, 9)
+            killed += 1
+        except (ProcessLookupError, PermissionError):
             continue
-    counts = {name: 0 for name in usernames}
-    for entry in os.listdir("/proc"):
-        if not entry.isdigit():
-            continue
-        try:
-            uid = os.stat(f"/proc/{entry}").st_uid
-        except (FileNotFoundError, PermissionError, ProcessLookupError):
-            continue
-        name = uid_map.get(uid)
-        if name:
-            counts[name] += 1
-    return counts
+    return killed
 
 
 # --------------------------------------------------------------------------- #
@@ -208,6 +278,7 @@ def connections_map(usernames: list[str]) -> dict[str, int]:
 @dataclass
 class ServerInfo:
     hostname: str = ""
+    address: str = ""      # endereço que o cliente usa para conectar
     os_name: str = ""
     uptime: str = ""
     cpu_percent: float = 0.0
@@ -277,20 +348,79 @@ def _read_os_name() -> str:
     return os.uname().sysname
 
 
-def detect_ssh_ports() -> list[int]:
+def _ports_from_file(path: str) -> set[int]:
     ports: set[int] = set()
     try:
-        for line in open("/etc/ssh/sshd_config"):
-            line = line.strip()
-            if line.lower().startswith("port "):
-                match = re.match(r"port\s+(\d+)", line, re.IGNORECASE)
+        with open(path) as fh:
+            for line in fh:
+                match = re.match(r"\s*port\s+(\d+)", line, re.IGNORECASE)
                 if match:
                     ports.add(int(match.group(1)))
+    except OSError:
+        pass
+    return ports
+
+
+def detect_ssh_ports() -> list[int]:
+    """Portas SSH configuradas, incluindo as definidas em sshd_config.d/."""
+    ports = _ports_from_file("/etc/ssh/sshd_config")
+    # Distribuições modernas espalham a configuração em drop-ins.
+    try:
+        for name in sorted(os.listdir("/etc/ssh/sshd_config.d")):
+            if name.endswith(".conf"):
+                ports |= _ports_from_file(os.path.join("/etc/ssh/sshd_config.d", name))
     except OSError:
         pass
     if not ports:
         ports.add(22)
     return sorted(ports)
+
+
+def public_address() -> str:
+    """Endereço que o cliente deve usar para conectar.
+
+    Prioriza PANEL_PUBLIC_HOST; senão descobre o IP público de saída. O
+    hostname interno da máquina não serve para o cliente.
+    """
+    configured = os.environ.get("PANEL_PUBLIC_HOST", "").strip()
+    if configured:
+        return configured
+
+    cached = getattr(public_address, "_cache", None)
+    if cached:
+        return cached
+
+    import socket
+
+    def _usable(value: str) -> bool:
+        return bool(value) and not value.startswith("127.")
+
+    address = ""
+    # IP da interface usada para sair à internet (não abre conexão de fato).
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.settimeout(1.0)
+            sock.connect(("1.1.1.1", 80))
+            candidate = sock.getsockname()[0]
+        if _usable(candidate):
+            address = candidate
+    except OSError:
+        pass
+
+    # Fallback: primeiro endereço não-loopback resolvido pelo hostname.
+    if not address:
+        try:
+            for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+                candidate = info[4][0]
+                if _usable(candidate):
+                    address = candidate
+                    break
+        except OSError:
+            pass
+
+    address = address or os.uname().nodename
+    public_address._cache = address  # type: ignore[attr-defined]
+    return address
 
 
 def server_info() -> ServerInfo:
@@ -303,6 +433,7 @@ def server_info() -> ServerInfo:
         disk_total = disk_used = 0.0
     return ServerInfo(
         hostname=os.uname().nodename,
+        address=public_address(),
         os_name=_read_os_name(),
         uptime=_read_uptime(),
         cpu_percent=_read_cpu_percent(),

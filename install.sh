@@ -18,6 +18,7 @@ REPO_URL="${REPO_URL:-https://github.com/Alefsousa5/4pluspainel-.git}"
 REPO_BRANCH="${REPO_BRANCH:-}"
 FALLBACK_BRANCHES=("main" "arena/01a038fb-4pluspainel" "master")
 DEFAULT_PORT=8080
+PUBLIC_HOST=""
 
 RED=$'\e[1;31m'; GREEN=$'\e[1;32m'; YELLOW=$'\e[1;33m'; BLUE=$'\e[1;36m'; BOLD=$'\e[1m'; NC=$'\e[0m'
 
@@ -122,6 +123,18 @@ ask_config() {
 # --------------------------------------------------------------------------- #
 # Instalação
 # --------------------------------------------------------------------------- #
+# Endereço que os clientes usarão para conectar no SSH (IP público ou domínio).
+# Fica gravado no serviço para o painel exibir os dados corretos ao revendedor.
+resolve_public_host() {
+  PUBLIC_HOST="${PANEL_PUBLIC_HOST:-$(public_ip)}"
+  if [[ "$PUBLIC_HOST" == "SEU_IP" ]]; then
+    PUBLIC_HOST=""
+    warn "Não foi possível descobrir o IP público; o painel tentará detectá-lo sozinho."
+  else
+    info "Endereço para os clientes: ${PUBLIC_HOST}"
+  fi
+}
+
 install_packages() {
   info "Atualizando índices de pacotes..."
   export DEBIAN_FRONTEND=noninteractive
@@ -157,9 +170,19 @@ clone_repo() {
     git clone --depth 1 -b "$br" "$REPO_URL" "${tmp}/repo" -q 2>/dev/null || continue
 
     if [[ -f "${tmp}/repo/app/main.py" ]]; then
+      # Preserva o banco de dados de uma instalação anterior.
+      if [[ -d "$DATA_DIR" ]]; then
+        info "Preservando dados existentes (contas e revendas)..."
+        mv "$DATA_DIR" "${tmp}/data_backup"
+      fi
       rm -rf "$INSTALL_DIR"
       mkdir -p "$(dirname "$INSTALL_DIR")"
       mv "${tmp}/repo" "$INSTALL_DIR"
+      if [[ -d "${tmp}/data_backup" ]]; then
+        rm -rf "$DATA_DIR"
+        mv "${tmp}/data_backup" "$DATA_DIR"
+        ok "Dados anteriores restaurados."
+      fi
       ok "Código obtido da branch '${br}'."
       return 0
     fi
@@ -208,41 +231,121 @@ setup_venv() {
 }
 
 create_admin() {
-  info "Criando administrador inicial..."
-  PANEL_DATA_DIR="$DATA_DIR" "${INSTALL_DIR}/.venv/bin/python" - "$ADMIN_USER" "$ADMIN_PASS" <<'PY'
-import sys, os
-sys.path.insert(0, "/opt/4pluspainel")
+  info "Configurando administrador..."
+  PANEL_DATA_DIR="$DATA_DIR" "${INSTALL_DIR}/.venv/bin/python" - \
+      "$INSTALL_DIR" "$ADMIN_USER" "$ADMIN_PASS" <<'PY'
+import sys
+install_dir, username, password = sys.argv[1], sys.argv[2], sys.argv[3]
+sys.path.insert(0, install_dir)
 from app.database import init_db, execute, query_one, now
 from app.security import hash_password
 
-username, password = sys.argv[1], sys.argv[2]
 init_db(username, password)
 row = query_one("SELECT id FROM admins WHERE username = ?", (username,))
 if row:
-    execute("UPDATE admins SET password_hash = ?, role = 'admin', active = 1 WHERE id = ?",
-            (hash_password(password), row["id"]))
+    # Já existia (reinstalação/atualização): garante que está ativo e como
+    # admin, mas só troca a senha se uma nova foi realmente informada.
+    if password:
+        execute("UPDATE admins SET password_hash = ?, role = 'admin', active = 1 WHERE id = ?",
+                (hash_password(password), row["id"]))
+    else:
+        execute("UPDATE admins SET role = 'admin', active = 1 WHERE id = ?", (row["id"],))
+    print("existente")
 else:
     execute("INSERT INTO admins (username, password_hash, role, user_limit, active, created_at)"
             " VALUES (?, ?, 'admin', 0, 1, ?)", (username, hash_password(password), now()))
+    print("novo")
 PY
   ok "Administrador '${ADMIN_USER}' configurado."
 }
 
+# As contas criadas pelo painel autenticam por SENHA e usam shell /bin/false.
+# Em quase toda VPS de nuvem o SSH vem com PasswordAuthentication no, o que
+# tornaria essas contas inutilizáveis. Aqui isso é corrigido de forma segura:
+# a regra é aplicada em um arquivo próprio dentro de sshd_config.d, sem
+# reescrever a configuração original do servidor.
 configure_ssh() {
   local sshd=/etc/ssh/sshd_config
+  local dropin_dir=/etc/ssh/sshd_config.d
+  local dropin="${dropin_dir}/99-4pluspainel.conf"
+
   [[ -f "$sshd" ]] || { warn "sshd_config não encontrado; pulando ajuste do SSH."; return; }
 
-  # Contas de túnel usam /bin/false: o SSH precisa aceitar senha.
-  if grep -qiE '^\s*PasswordAuthentication\s+no' "$sshd"; then
-    warn "PasswordAuthentication está desativado no SSH."
-    warn "As contas criadas pelo painel usam senha — ajuste ${sshd} se precisar."
+  # O binário do sshd não costuma estar no PATH do root em todos os sistemas.
+  local SSHD_BIN=""
+  local cand
+  for cand in /usr/sbin/sshd /sbin/sshd "$(command -v sshd 2>/dev/null || true)"; do
+    [[ -n "$cand" && -x "$cand" ]] && { SSHD_BIN="$cand"; break; }
+  done
+
+  # /bin/false precisa constar em /etc/shells para o login de túnel funcionar
+  # com alguns módulos PAM (pam_shells).
+  grep -qx '/bin/false' /etc/shells 2>/dev/null || echo '/bin/false' >> /etc/shells
+  grep -qx '/usr/sbin/nologin' /etc/shells 2>/dev/null || echo '/usr/sbin/nologin' >> /etc/shells
+
+  # Backup único da configuração original.
+  [[ -f "${sshd}.4plus.bak" ]] || cp "$sshd" "${sshd}.4plus.bak"
+
+  if grep -qE '^\s*Include\s+/etc/ssh/sshd_config\.d/\*\.conf' "$sshd" && [[ -d "$dropin_dir" ]]; then
+    # Caminho moderno (Debian 11+/Ubuntu 22.04+): usa drop-in.
+    cat > "$dropin" <<'EOF'
+# 4Plus Painel — as contas do painel autenticam por senha.
+# Remova este arquivo se desativar o painel.
+PasswordAuthentication yes
+EOF
+    chmod 644 "$dropin"
+    ok "SSH configurado via ${dropin}"
+  else
+    # Sem suporte a Include: edita o arquivo principal com cuidado.
+    if grep -qiE '^\s*PasswordAuthentication\s+' "$sshd"; then
+      sed -i -E 's/^\s*#?\s*PasswordAuthentication\s+.*/PasswordAuthentication yes/I' "$sshd"
+    else
+      printf '\n# 4Plus Painel\nPasswordAuthentication yes\n' >> "$sshd"
+    fi
+    ok "SSH configurado em ${sshd} (backup em ${sshd}.4plus.bak)"
   fi
 
-  # Garante que /bin/false seja um shell válido para login por túnel
-  if ! grep -qx '/bin/false' /etc/shells 2>/dev/null; then
-    echo '/bin/false' >> /etc/shells
+  # Alguns provedores forçam a negativa em drop-ins que vêm depois na ordem
+  # alfabética (ex.: 60-cloudimg-settings.conf). Neutraliza esses casos.
+  local f
+  for f in "${dropin_dir}"/*.conf; do
+    [[ -e "$f" ]] || continue
+    [[ "$f" == "$dropin" ]] && continue
+    if grep -qiE '^\s*PasswordAuthentication\s+no' "$f"; then
+      sed -i -E 's/^(\s*PasswordAuthentication\s+no)/# \1  # desativado pelo 4Plus Painel/I' "$f"
+      warn "Ajustado ${f} (PasswordAuthentication estava desativado)."
+    fi
+  done
+
+  # Valida a configuração ANTES de reiniciar — nunca deixa o SSH quebrado.
+  if [[ -n "$SSHD_BIN" ]] && ! "$SSHD_BIN" -t 2>/tmp/4plus_sshd_test.err; then
+    warn "A configuração do SSH ficou inválida; restaurando o backup."
+    cp "${sshd}.4plus.bak" "$sshd"
+    rm -f "$dropin"
+    cat /tmp/4plus_sshd_test.err >&2 || true
+    warn "SSH mantido como estava. Ative PasswordAuthentication manualmente."
+    return
   fi
-  ok "SSH verificado."
+
+  # Recarrega sem derrubar as sessões existentes.
+  local svc
+  for svc in ssh sshd; do
+    if systemctl list-unit-files 2>/dev/null | grep -q "^${svc}\.service"; then
+      systemctl reload "$svc" 2>/dev/null || systemctl restart "$svc" 2>/dev/null || true
+      break
+    fi
+  done
+
+  # Obs.: `cmd | grep -q` fecha o pipe cedo e, com `pipefail`, retorna 141
+  # (SIGPIPE). Por isso a saída é capturada antes de ser inspecionada.
+  local effective=""
+  [[ -n "$SSHD_BIN" ]] && effective="$("$SSHD_BIN" -T 2>/dev/null || true)"
+  if [[ "$effective" == *"passwordauthentication yes"* ]]; then
+    ok "Autenticação por senha ativa — as contas do painel vão conectar."
+  else
+    warn "Não foi possível confirmar PasswordAuthentication."
+    warn "Verifique com: ${SSHD_BIN:-sshd} -T | grep -i passwordauth"
+  fi
 }
 
 create_service() {
@@ -258,6 +361,7 @@ User=root
 WorkingDirectory=${INSTALL_DIR}
 Environment=PANEL_DATA_DIR=${DATA_DIR}
 Environment=PANEL_PORT=${PORT}
+Environment=PANEL_PUBLIC_HOST=${PUBLIC_HOST}
 Environment=PYTHONUNBUFFERED=1
 ExecStart=${INSTALL_DIR}/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port ${PORT}
 Restart=always
@@ -294,9 +398,11 @@ open_firewall() {
 }
 
 public_ip() {
-  curl -s --max-time 5 https://api.ipify.org 2>/dev/null \
-    || hostname -I 2>/dev/null | awk '{print $1}' \
-    || echo "SEU_IP"
+  local ip=""
+  ip="$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null || true)"
+  [[ -z "$ip" ]] && ip="$(curl -s --max-time 5 https://ifconfig.me 2>/dev/null || true)"
+  [[ -z "$ip" ]] && ip="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+  echo "${ip:-SEU_IP}"
 }
 
 finish() {
@@ -327,6 +433,7 @@ main() {
   check_os
   ask_config
   install_packages
+  resolve_public_host
   fetch_code
   setup_venv
   create_admin

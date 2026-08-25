@@ -39,11 +39,15 @@ sudo REPO_BRANCH=minha-branch bash install.sh
 O instalador pergunta a **porta**, o **usuário admin** e a **senha**, depois:
 
 1. instala `python3`, `git` e `openssh-server`;
-2. copia o painel para `/opt/4pluspainel`;
+2. copia o painel para `/opt/4pluspainel` (preservando o banco, se já existir);
 3. cria o ambiente virtual e instala as dependências;
-4. registra o serviço systemd `4pluspainel` (inicia junto com o servidor);
-5. instala o comando `painel`;
-6. libera a porta no UFW, se estiver ativo.
+4. **ativa a autenticação por senha no SSH** — sem isso as contas do painel
+   não conseguem conectar, e a maioria das VPS vem com ela desligada. A
+   mudança é feita em `/etc/ssh/sshd_config.d/99-4pluspainel.conf`, com
+   backup e validação (`sshd -t`) antes de recarregar o serviço;
+5. registra o serviço systemd `4pluspainel` (inicia junto com o servidor);
+6. instala o comando `painel`;
+7. libera a porta no UFW, se estiver ativo.
 
 Ao final ele mostra o endereço de acesso e as credenciais.
 
@@ -51,6 +55,23 @@ Ao final ele mostra o endereço de acesso e as credenciais.
 
 ```bash
 sudo PANEL_UNATTENDED=1 PANEL_PORT=8080 PANEL_ADMIN=admin PANEL_ADMIN_PASS=suasenha bash install.sh
+```
+
+### Variáveis aceitas
+
+| Variável | Para que serve |
+|---|---|
+| `PANEL_PORT` | porta do painel (padrão 8080) |
+| `PANEL_ADMIN` / `PANEL_ADMIN_PASS` | credenciais do administrador |
+| `PANEL_PUBLIC_HOST` | IP ou domínio que os clientes usam para conectar; se omitido, é detectado automaticamente |
+| `REPO_BRANCH` | branch a ser baixada |
+| `PANEL_UNATTENDED` | instala sem perguntar nada |
+
+Se você usa um domínio, informe-o para que os dados copiados no painel já
+saiam corretos:
+
+```bash
+sudo PANEL_PUBLIC_HOST=vpn.seudominio.com bash install.sh
 ```
 
 ---
@@ -65,6 +86,8 @@ sudo PANEL_UNATTENDED=1 PANEL_PORT=8080 PANEL_ADMIN=admin PANEL_ADMIN_PASS=suase
 | `A branch 'main' não contém o painel` | Normal — o instalador avisa e tenta a próxima branch sozinho. |
 | Não abre no navegador | Libere a porta no firewall do provedor (Oracle/AWS/Contabo têm firewall próprio, fora do UFW). Confira com `painel status`. |
 | Serviço não sobe | Veja o erro real com `painel logs` ou `journalctl -u 4pluspainel -n 50`. |
+| Cliente não conecta no SSH (`Permission denied`) | Confirme que a senha está liberada: `sshd -T \| grep -i passwordauth` deve responder `yes`. O instalador ajusta isso, mas um painel de provedor pode sobrescrever. |
+| Painel mostra host errado nos dados do cliente | Rode com `PANEL_PUBLIC_HOST=seu.ip.ou.dominio` ou edite `Environment=PANEL_PUBLIC_HOST=` em `/etc/systemd/system/4pluspainel.service` e rode `painel restart`. |
 
 ## Comando `painel`
 

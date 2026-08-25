@@ -48,12 +48,12 @@ case "${1:-menu}" in
     read -rp "Usuário do painel [admin]: " u; u="${u:-admin}"
     read -rsp "Nova senha: " p; echo
     [[ ${#p} -ge 4 ]] || die "A senha precisa ter ao menos 4 caracteres."
-    PANEL_DATA_DIR="$DATA_DIR" "${INSTALL_DIR}/.venv/bin/python" - "$u" "$p" <<'PY'
+    PANEL_DATA_DIR="$DATA_DIR" "${INSTALL_DIR}/.venv/bin/python" - "$INSTALL_DIR" "$u" "$p" <<'PY'
 import sys
-sys.path.insert(0, "/opt/4pluspainel")
+sys.path.insert(0, sys.argv[1])
 from app.database import init_db, execute, query_one, now
 from app.security import hash_password
-u, p = sys.argv[1], sys.argv[2]
+u, p = sys.argv[2], sys.argv[3]
 init_db()
 row = query_one("SELECT id FROM admins WHERE username = ?", (u,))
 if row:

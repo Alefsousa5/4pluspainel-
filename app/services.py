@@ -347,10 +347,12 @@ def enforce_rules() -> dict[str, int]:
         online = counts.get(row["username"], 0)
         if online > row["connection_limit"]:
             try:
-                killed = ssh_manager.kill_sessions(row["username"])
-                add_log("sistema", "excesso de conexões", row["username"],
-                        f"{online}/{row['connection_limit']} — {killed} sessões encerradas")
-                over_limit += 1
+                # derruba só o excedente, preservando as conexões dentro do limite
+                killed = ssh_manager.kill_excess_sessions(row["username"], row["connection_limit"])
+                if killed:
+                    add_log("sistema", "excesso de conexões", row["username"],
+                            f"{online}/{row['connection_limit']} — {killed} sessão(ões) excedente(s) encerrada(s)")
+                    over_limit += 1
             except ssh_manager.SSHError:
                 pass
     return {"expired": expired, "over_limit": over_limit}
