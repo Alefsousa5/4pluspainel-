@@ -271,6 +271,20 @@ fetch_code() {
 # Instala o pacote venv correspondente à versão do Python presente.
 # Em Debian/Ubuntu o 'python3-venv' nem sempre traz o ensurepip: é preciso o
 # pacote versionado (python3.8-venv, python3.11-venv, ...).
+# O painel exige Python 3.8 ou superior. Falhar aqui, com mensagem clara, é
+# muito melhor do que instalar e só descobrir o problema ao usar o painel.
+check_python_version() {
+  local ver major minor
+  ver="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo "")"
+  [[ -n "$ver" ]] || die "Python 3 não encontrado. Instale com: apt install -y python3"
+  major="${ver%%.*}"; minor="${ver##*.}"
+  if (( major < 3 || (major == 3 && minor < 8) )); then
+    die "Python ${ver} é antigo demais — o painel precisa de 3.8 ou superior.
+      Atualize o sistema ou instale um Python mais novo antes de continuar."
+  fi
+  ok "Python ${ver} detectado."
+}
+
 ensure_venv_support() {
   local pyver
   pyver="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || echo "")"
@@ -298,6 +312,7 @@ setup_venv() {
   local venv="${INSTALL_DIR}/.venv"
   local py="${venv}/bin/python"
 
+  check_python_version
   ensure_venv_support
 
   # Recria do zero: um venv copiado/movido de outro caminho fica com os

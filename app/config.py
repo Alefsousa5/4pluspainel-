@@ -3,7 +3,16 @@ from __future__ import annotations
 
 import os
 import secrets
+import sys
 from pathlib import Path
+
+# Falha cedo e com mensagem clara em Python antigo, em vez de quebrar
+# apenas quando o usuário tentar criar uma conta.
+if sys.version_info < (3, 8):
+    raise RuntimeError(
+        "O 4Plus Painel precisa de Python 3.8 ou superior "
+        f"(encontrado {sys.version_info.major}.{sys.version_info.minor})."
+    )
 
 
 def _env_bool(name: str, default: bool = False) -> bool:

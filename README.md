@@ -86,6 +86,7 @@ sudo PANEL_PUBLIC_HOST=vpn.seudominio.com bash install.sh
 | `404: Not Found` ao usar `curl` | Mesma coisa: a URL apontava para a `main`. Use a URL com a branch correta acima. |
 | `Falha inesperada na linha 102` | Versão antiga: o script morria quando rodado sem terminal (`bash <(curl ...)`). Atualize e rode de novo — agora ele usa os valores padrão nesse caso. |
 | `bash: /dev/fd/63: No such file or directory` | Acontece ao combinar `sudo` com `bash <(...)`. Rode como root (`sudo -i`) ou baixe o arquivo antes: `curl -sSLO <url> && sudo bash install.sh`. |
+| Painel abre e o login funciona, mas criar conta dá "Erro interno" | Versão antiga rodando em Python 3.8 (Ubuntu 20.04): o código usava `asyncio.to_thread`, que só existe no 3.9+. Atualize (`git pull`) e reinstale. |
 | Instalou sem perguntar nada | É esperado quando não há terminal (pipe, cron, `bash <(curl ...)`). Para escolher porta e senha, baixe o arquivo antes: `curl -sSLO <url> && sudo bash install.sh`. |
 | `Execute como root` | Rode com `sudo bash install.sh`. |
 | `A branch 'main' não contém o painel` | Normal — o instalador avisa e tenta a próxima branch sozinho. |
@@ -191,9 +192,13 @@ sudo journalctl -u 4pluspainel -f     # ou: painel logs
 
 ## Compatibilidade
 
-Testado em Debian 12 (Python 3.11). O `requirements.txt` usa faixas de versão
+Requer **Python 3.8 ou superior**. O `requirements.txt` usa faixas de versão
 em vez de versões fixas, então o pip escolhe o que funciona no Python da sua
 VPS — de **Python 3.8** (Ubuntu 20.04) a 3.12 (Ubuntu 24.04).
+
+O instalador verifica a versão do Python antes de começar e aborta com uma
+mensagem clara se for antiga demais. O código é validado contra o Python 3.8
+para não usar recursos que só existem em versões mais novas.
 
 ## Desenvolvimento local
 

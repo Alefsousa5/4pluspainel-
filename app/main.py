@@ -73,6 +73,16 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     )
 
 
+async def run_in_thread(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Executa uma função bloqueante numa thread.
+
+    Equivale a asyncio.to_thread(), que só existe a partir do Python 3.9.
+    O Ubuntu 20.04 ainda traz Python 3.8, então usamos run_in_executor.
+    """
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, functools.partial(func, *args, **kwargs))
+
+
 def api(handler: Callable[..., Any]):
     """Envolve handlers síncronos de API:
 
@@ -82,7 +92,7 @@ def api(handler: Callable[..., Any]):
     @functools.wraps(handler)
     async def wrapper(*args, **kwargs):
         try:
-            result = await asyncio.to_thread(functools.partial(handler, *args, **kwargs))
+            result = await run_in_thread(handler, *args, **kwargs)
             return JSONResponse({"ok": True, **(result or {})})
         except (ServiceError, ssh_manager.SSHError) as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
@@ -114,7 +124,7 @@ async def monitor_loop() -> None:
     while True:
         try:
             await asyncio.sleep(config.MONITOR_INTERVAL)
-            await asyncio.to_thread(enforce_rules)
+            await run_in_thread(enforce_rules)
         except asyncio.CancelledError:
             break
         except Exception:  # nunca derruba o loop
