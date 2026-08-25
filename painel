@@ -94,7 +94,13 @@ PY
   info|menu|"")
     port="$(panel_port)"
     ip="$(curl -s --max-time 4 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')"
-    estado="$(systemctl is-active "$SERVICE" 2>/dev/null || echo inativo)"
+    estado="$(systemctl is-active "$SERVICE" 2>/dev/null)" || true
+    case "$estado" in
+      active)   estado="ativo" ;;
+      inactive) estado="parado" ;;
+      failed)   estado="com falha" ;;
+      "")       estado="não instalado" ;;
+    esac
     echo
     echo "${BLUE}${BOLD}  4PLUS PAINEL${NC}"
     echo "  ─────────────────────────────────"

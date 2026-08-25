@@ -10,18 +10,30 @@ data de expiração aplicada no próprio Linux.
 
 ## Instalação na VPS
 
+> **Atenção:** enquanto o código estiver apenas na branch de trabalho
+> (`arena/01a038fb-4pluspainel`) e não na `main`, use os comandos abaixo com
+> `-b arena/01a038fb-4pluspainel`. Depois de fazer o merge na `main`, os
+> comandos com `main` passam a funcionar normalmente.
+
 Como **root**, em uma VPS Debian 11+ / Ubuntu 20.04+:
 
 ```bash
-bash <(curl -sSL https://raw.githubusercontent.com/Alefsousa5/4pluspainel-/main/install.sh)
-```
-
-Ou clonando o repositório:
-
-```bash
-git clone https://github.com/Alefsousa5/4pluspainel-.git
+git clone -b arena/01a038fb-4pluspainel https://github.com/Alefsousa5/4pluspainel-.git
 cd 4pluspainel-
 sudo bash install.sh
+```
+
+Ou pelo instalador direto (ele procura sozinho a branch que contém o painel):
+
+```bash
+curl -sSLO https://raw.githubusercontent.com/Alefsousa5/4pluspainel-/arena/01a038fb-4pluspainel/install.sh
+sudo bash install.sh
+```
+
+Se o repositório estiver em outra branch, é só informar:
+
+```bash
+sudo REPO_BRANCH=minha-branch bash install.sh
 ```
 
 O instalador pergunta a **porta**, o **usuário admin** e a **senha**, depois:
@@ -42,6 +54,17 @@ sudo PANEL_UNATTENDED=1 PANEL_PORT=8080 PANEL_ADMIN=admin PANEL_ADMIN_PASS=suase
 ```
 
 ---
+
+### Se algo der errado
+
+| Sintoma | Causa provável / solução |
+|---|---|
+| `install.sh: No such file or directory` | O clone veio da `main`, que ainda não tem o código. Use `git clone -b arena/01a038fb-4pluspainel ...` |
+| `404: Not Found` ao usar `curl` | Mesma coisa: a URL apontava para a `main`. Use a URL com a branch correta acima. |
+| `Execute como root` | Rode com `sudo bash install.sh`. |
+| `A branch 'main' não contém o painel` | Normal — o instalador avisa e tenta a próxima branch sozinho. |
+| Não abre no navegador | Libere a porta no firewall do provedor (Oracle/AWS/Contabo têm firewall próprio, fora do UFW). Confira com `painel status`. |
+| Serviço não sobe | Veja o erro real com `painel logs` ou `journalctl -u 4pluspainel -n 50`. |
 
 ## Comando `painel`
 

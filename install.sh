@@ -14,7 +14,9 @@ INSTALL_DIR="/opt/4pluspainel"
 DATA_DIR="${INSTALL_DIR}/data"
 SERVICE="4pluspainel"
 REPO_URL="${REPO_URL:-https://github.com/Alefsousa5/4pluspainel-.git}"
-REPO_BRANCH="${REPO_BRANCH:-main}"
+# Branches tentadas em ordem, caso REPO_BRANCH não seja informada.
+REPO_BRANCH="${REPO_BRANCH:-}"
+FALLBACK_BRANCHES=("main" "arena/01a038fb-4pluspainel" "master")
 DEFAULT_PORT=8080
 
 RED=$'\e[1;31m'; GREEN=$'\e[1;32m'; YELLOW=$'\e[1;33m'; BLUE=$'\e[1;36m'; BOLD=$'\e[1m'; NC=$'\e[0m'
@@ -22,9 +24,23 @@ RED=$'\e[1;31m'; GREEN=$'\e[1;32m'; YELLOW=$'\e[1;33m'; BLUE=$'\e[1;36m'; BOLD=$
 info()  { echo "${BLUE}[*]${NC} $*"; }
 ok()    { echo "${GREEN}[✓]${NC} $*"; }
 warn()  { echo "${YELLOW}[!]${NC} $*"; }
-die()   { echo "${RED}[x]${NC} $*" >&2; exit 1; }
 
-trap 'die "Falha na linha $LINENO. Instalação abortada."' ERR
+# die() marca que a mensagem já foi exibida, para o trap não duplicar o erro.
+die() {
+  DIED=1
+  echo "${RED}[x]${NC} $*" >&2
+  exit 1
+}
+
+DIED=0
+on_error() {
+  local line="$1"
+  [[ "$DIED" == "1" ]] && exit 1   # erro já reportado por die()
+  echo "${RED}[x]${NC} Falha inesperada na linha ${line}." >&2
+  echo "    Rode novamente; se persistir, envie a saída acima." >&2
+  exit 1
+}
+trap 'on_error $LINENO' ERR
 
 banner() {
   clear 2>/dev/null || true
@@ -66,11 +82,18 @@ port_in_use() {
 # --------------------------------------------------------------------------- #
 # Entrada do usuário
 # --------------------------------------------------------------------------- #
+# Gera uma senha aleatória.
+# Obs.: usar `tr ... | head -c` quebra com `set -e` porque o head fecha o pipe
+# e o tr morre com SIGPIPE — por isso o corte é feito com `cut`.
+gen_password() {
+  head -c 400 /dev/urandom | tr -dc 'a-z0-9' | cut -c1-12
+}
+
 ask_config() {
   if [[ -n "${PANEL_UNATTENDED:-}" ]]; then
     PORT="${PANEL_PORT:-$DEFAULT_PORT}"
     ADMIN_USER="${PANEL_ADMIN:-admin}"
-    ADMIN_PASS="${PANEL_ADMIN_PASS:-$(tr -dc 'a-z0-9' </dev/urandom | head -c 10)}"
+    ADMIN_PASS="${PANEL_ADMIN_PASS:-$(gen_password)}"
     info "Instalação silenciosa: porta ${PORT}, admin ${ADMIN_USER}"
     return
   fi
@@ -89,7 +112,7 @@ ask_config() {
 
   read -rsp "$(echo "${BOLD}Senha do administrador${NC} (enter = gerar): ")" ADMIN_PASS; echo
   if [[ -z "$ADMIN_PASS" ]]; then
-    ADMIN_PASS="$(tr -dc 'a-z0-9' </dev/urandom | head -c 10)"
+    ADMIN_PASS="$(gen_password)"
     info "Senha gerada automaticamente."
   elif (( ${#ADMIN_PASS} < 4 )); then
     die "A senha precisa ter ao menos 4 caracteres."
@@ -112,24 +135,65 @@ install_packages() {
   ok "Dependências instaladas."
 }
 
+# Baixa o painel testando as branches candidatas até achar uma que
+# realmente contenha o código (evita instalar um repositório só com README).
+clone_repo() {
+  local candidates=()
+  if [[ -n "$REPO_BRANCH" ]]; then
+    candidates=("$REPO_BRANCH")
+  else
+    candidates=("${FALLBACK_BRANCHES[@]}")
+  fi
+
+  local tmp br
+  tmp="$(mktemp -d)"
+  # shellcheck disable=SC2064
+  trap "rm -rf '$tmp'" RETURN
+
+  for br in "${candidates[@]}"; do
+    git ls-remote --exit-code --heads "$REPO_URL" "$br" >/dev/null 2>&1 || continue
+    info "Baixando o painel (branch ${br})..."
+    rm -rf "${tmp}/repo"
+    git clone --depth 1 -b "$br" "$REPO_URL" "${tmp}/repo" -q 2>/dev/null || continue
+
+    if [[ -f "${tmp}/repo/app/main.py" ]]; then
+      rm -rf "$INSTALL_DIR"
+      mkdir -p "$(dirname "$INSTALL_DIR")"
+      mv "${tmp}/repo" "$INSTALL_DIR"
+      ok "Código obtido da branch '${br}'."
+      return 0
+    fi
+    warn "A branch '${br}' não contém o painel; tentando a próxima..."
+  done
+
+  die "Não encontrei os arquivos do painel no repositório.
+      Rode novamente informando a branch correta, por exemplo:
+      REPO_BRANCH=arena/01a038fb-4pluspainel bash install.sh"
+}
+
 fetch_code() {
-  if [[ -f "$(dirname "$(readlink -f "$0")")/app/main.py" ]]; then
+  local src; src="$(dirname "$(readlink -f "$0")")"
+
+  if [[ -f "${src}/app/main.py" ]]; then
     # rodando de dentro do repositório já clonado
-    local src; src="$(dirname "$(readlink -f "$0")")"
     info "Copiando arquivos de ${src}..."
     mkdir -p "$INSTALL_DIR"
     cp -r "${src}/app" "${src}/requirements.txt" "$INSTALL_DIR"/
     [[ -f "${src}/painel" ]] && cp "${src}/painel" "$INSTALL_DIR"/
   elif [[ -d "${INSTALL_DIR}/.git" ]]; then
     info "Atualizando instalação existente..."
-    git -C "$INSTALL_DIR" fetch --depth 1 origin "$REPO_BRANCH" -q
-    git -C "$INSTALL_DIR" reset --hard "origin/${REPO_BRANCH}" -q
+    local br; br="$(git -C "$INSTALL_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
+    if git -C "$INSTALL_DIR" fetch --depth 1 origin "$br" -q 2>/dev/null; then
+      git -C "$INSTALL_DIR" reset --hard "origin/${br}" -q
+    else
+      warn "Não foi possível atualizar; refazendo o download."
+      clone_repo
+    fi
   else
-    info "Baixando o painel de ${REPO_URL}..."
-    rm -rf "$INSTALL_DIR"
-    git clone --depth 1 -b "$REPO_BRANCH" "$REPO_URL" "$INSTALL_DIR" -q \
-      || die "Não foi possível clonar o repositório."
+    clone_repo
   fi
+
+  [[ -f "${INSTALL_DIR}/app/main.py" ]] || die "Arquivos do painel não encontrados em ${INSTALL_DIR}."
   mkdir -p "$DATA_DIR"
   ok "Arquivos em ${INSTALL_DIR}"
 }
