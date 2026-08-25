@@ -338,6 +338,14 @@ fetch_code() {
     mkdir -p "$INSTALL_DIR"
     cp -r "${src}/app" "${src}/requirements.txt" "$INSTALL_DIR"/
     [[ -f "${src}/painel" ]] && cp "${src}/painel" "$INSTALL_DIR"/
+    [[ -f "${src}/diagnostico.sh" ]] && cp "${src}/diagnostico.sh" "$INSTALL_DIR"/
+    # Leva o .git junto para que 'painel atualizar' funcione depois.
+    if [[ -d "${src}/.git" && ! -d "${INSTALL_DIR}/.git" ]]; then
+      cp -r "${src}/.git" "${INSTALL_DIR}/.git" 2>/dev/null || true
+      # Garante que o remote aponte para o GitHub, sem token.
+      git -C "$INSTALL_DIR" remote set-url origin \
+        "https://${GITHUB_HOST}/${GITHUB_REPO}.git" 2>/dev/null || true
+    fi
   elif [[ -d "${INSTALL_DIR}/.git" ]]; then
     info "Atualizando instalação existente..."
     local br; br="$(git -C "$INSTALL_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
