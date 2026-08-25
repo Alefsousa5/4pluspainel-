@@ -85,6 +85,7 @@ sudo PANEL_PUBLIC_HOST=vpn.seudominio.com bash install.sh
 | `install.sh: No such file or directory` | O clone veio da `main`, que ainda não tem o código. Use `git clone -b arena/01a038fb-4pluspainel ...` |
 | `404: Not Found` ao usar `curl` | Mesma coisa: a URL apontava para a `main`. Use a URL com a branch correta acima. |
 | `Falha inesperada na linha 102` | Versão antiga: o script morria quando rodado sem terminal (`bash <(curl ...)`). Atualize e rode de novo — agora ele usa os valores padrão nesse caso. |
+| `bash: /dev/fd/63: No such file or directory` | Acontece ao combinar `sudo` com `bash <(...)`. Rode como root (`sudo -i`) ou baixe o arquivo antes: `curl -sSLO <url> && sudo bash install.sh`. |
 | Instalou sem perguntar nada | É esperado quando não há terminal (pipe, cron, `bash <(curl ...)`). Para escolher porta e senha, baixe o arquivo antes: `curl -sSLO <url> && sudo bash install.sh`. |
 | `Execute como root` | Rode com `sudo bash install.sh`. |
 | `A branch 'main' não contém o painel` | Normal — o instalador avisa e tenta a próxima branch sozinho. |
