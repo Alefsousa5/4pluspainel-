@@ -36,7 +36,199 @@ panel_port() {
   grep -oP 'PANEL_PORT=\K[0-9]+' "/etc/systemd/system/${SERVICE}.service" 2>/dev/null || echo 8080
 }
 
+# --------------------------------------------------------------------------- #
+# Menu interativo
+# --------------------------------------------------------------------------- #
+PY_BIN="${INSTALL_DIR}/.venv/bin/python"
+
+# Executa um comando do backend Python (mesmas regras da interface web).
+pycli() {
+  [[ -x "$PY_BIN" ]] || die "Painel não instalado em ${INSTALL_DIR}. Rode: sudo bash install.sh"
+  ( cd "$INSTALL_DIR" && PANEL_DATA_DIR="$DATA_DIR" "$PY_BIN" -m app.cli "$@" )
+}
+
+pausar() {
+  [[ -z "$TTY_IN" ]] && return 0
+  echo
+  read -rp "  Pressione ENTER para voltar ao menu..." _ <"$TTY_IN" || true
+}
+
+cabecalho() {
+  clear 2>/dev/null || true
+  local estado port ip
+  estado="$(systemctl is-active "$SERVICE" 2>/dev/null)" || true
+  case "$estado" in
+    active)     estado="${GREEN}ativo${NC}" ;;
+    activating) estado="${YELLOW}reiniciando${NC}" ;;
+    *)          estado="${RED}${estado:-parado}${NC}" ;;
+  esac
+  port="$(panel_port)"
+  ip="$(cat "${INSTALL_DIR}/.ip_cache" 2>/dev/null || true)"
+  if [[ -z "$ip" ]]; then
+    ip="$(curl -s --max-time 3 https://api.ipify.org 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')"
+    [[ -n "$ip" ]] && echo "$ip" > "${INSTALL_DIR}/.ip_cache" 2>/dev/null || true
+  fi
+  echo
+  echo "${BLUE}${BOLD}  ╔════════════════════════════════════════════════╗${NC}"
+  echo "${BLUE}${BOLD}  ║              4 P L U S   P A I N E L           ║${NC}"
+  echo "${BLUE}${BOLD}  ╚════════════════════════════════════════════════╝${NC}"
+  echo "   Painel: ${BOLD}http://${ip}:${port}${NC}   Serviço: ${estado}"
+  echo "  ──────────────────────────────────────────────────"
+}
+
+menu_contas() {
+  while true; do
+    cabecalho
+    echo "   ${BOLD}CONTAS SSH${NC}"
+    echo
+    echo "     ${GREEN}1${NC}  Listar contas"
+    echo "     ${GREEN}2${NC}  Criar conta"
+    echo "     ${GREEN}3${NC}  Remover conta"
+    echo "     ${GREEN}4${NC}  Renovar conta"
+    echo "     ${GREEN}5${NC}  Bloquear / desbloquear"
+    echo "     ${GREEN}6${NC}  Derrubar sessões"
+    echo "     ${GREEN}7${NC}  Ver quem está online"
+    echo
+    echo "     ${YELLOW}0${NC}  Voltar"
+    echo "  ──────────────────────────────────────────────────"
+    ask op "   Opção: " ""
+    case "$op" in
+      1) pycli listar; pausar ;;
+      2) criar_conta_interativo; pausar ;;
+      3) acao_em_conta remover; pausar ;;
+      4) acao_em_conta renovar; pausar ;;
+      5) acao_em_conta bloquear; pausar ;;
+      6) acao_em_conta derrubar; pausar ;;
+      7) pycli online; pausar ;;
+      0|"") return ;;
+      *) echo "   ${RED}Opção inválida.${NC}"; sleep 1 ;;
+    esac
+  done
+}
+
+criar_conta_interativo() {
+  echo
+  ask nome "   Nome de usuário: " ""
+  if [[ -z "$nome" ]]; then echo "   ${RED}Nome obrigatório.${NC}"; return; fi
+
+  local sugestao; sugestao="$(pycli gerar-senha 2>/dev/null | tr -d '\r\n')"
+  ask senha "   Senha [${sugestao}]: " "$sugestao"
+  ask limite "   Limite de conexões [1]: " "1"
+  ask dias "   Validade em dias [30]: " "30"
+  ask nota "   Observação (opcional): " ""
+
+  pycli criar "$nome" "$senha" "$limite" "$dias" "$nota"
+}
+
+acao_em_conta() {
+  local acao="$1"
+  pycli listar || return
+  local n
+  ask n "   Número da conta (0 cancela): " "0"
+  [[ "$n" == "0" || -z "$n" ]] && return
+  if ! [[ "$n" =~ ^[0-9]+$ ]]; then echo "   ${RED}Informe um número.${NC}"; return; fi
+
+  case "$acao" in
+    remover)
+      local c; ask c "   ${YELLOW}Confirma a exclusão? [s/N]: ${NC}" "n"
+      [[ "${c,,}" == "s" ]] || { echo "   Cancelado."; return; }
+      pycli remover "$n" ;;
+    renovar)
+      local d; ask d "   Dias a adicionar [30]: " "30"
+      pycli renovar "$n" "$d" ;;
+    bloquear) pycli bloquear "$n" ;;
+    derrubar) pycli derrubar "$n" ;;
+  esac
+}
+
+menu_servico() {
+  while true; do
+    cabecalho
+    echo "   ${BOLD}SERVIÇO E CONFIGURAÇÕES${NC}"
+    echo
+    echo "     ${GREEN}1${NC}  Ver status"
+    echo "     ${GREEN}2${NC}  Reiniciar painel"
+    echo "     ${GREEN}3${NC}  Parar painel"
+    echo "     ${GREEN}4${NC}  Iniciar painel"
+    echo "     ${GREEN}5${NC}  Trocar porta"
+    echo "     ${GREEN}6${NC}  Trocar senha do administrador"
+    echo "     ${GREEN}7${NC}  Ver dados de acesso (IP, usuário, senha)"
+    echo "     ${GREEN}8${NC}  Ver log em tempo real"
+    echo
+    echo "     ${YELLOW}0${NC}  Voltar"
+    echo "  ──────────────────────────────────────────────────"
+    ask op "   Opção: " ""
+    case "$op" in
+      1) systemctl status "$SERVICE" --no-pager 2>&1 | head -14; pausar ;;
+      2) systemctl restart "$SERVICE" && ok "Painel reiniciado."; pausar ;;
+      3) systemctl stop "$SERVICE" && ok "Painel parado."; pausar ;;
+      4) systemctl start "$SERVICE" && ok "Painel iniciado."; pausar ;;
+      5) local p; ask p "   Nova porta: " ""
+         [[ -n "$p" ]] && "$0" porta "$p"; pausar ;;
+      6) "$0" senha; pausar ;;
+      7) "$0" acesso; pausar ;;
+      8) echo "   (Ctrl+C para sair do log)"; sleep 1; journalctl -u "$SERVICE" -f --no-pager || true ;;
+      0|"") return ;;
+      *) echo "   ${RED}Opção inválida.${NC}"; sleep 1 ;;
+    esac
+  done
+}
+
+menu_manutencao() {
+  while true; do
+    cabecalho
+    echo "   ${BOLD}MANUTENÇÃO${NC}"
+    echo
+    echo "     ${GREEN}1${NC}  Diagnóstico (doctor)"
+    echo "     ${GREEN}2${NC}  Reparar ambiente Python"
+    echo "     ${GREEN}3${NC}  Gerar relatório de suporte"
+    echo "     ${GREEN}4${NC}  Backup do banco de dados"
+    echo "     ${GREEN}5${NC}  Atualizar painel"
+    echo "     ${RED}6${NC}  Desinstalar painel"
+    echo
+    echo "     ${YELLOW}0${NC}  Voltar"
+    echo "  ──────────────────────────────────────────────────"
+    ask op "   Opção: " ""
+    case "$op" in
+      1) "$0" doctor; pausar ;;
+      2) "$0" reparar; pausar ;;
+      3) "$0" relatorio; pausar ;;
+      4) "$0" backup; pausar ;;
+      5) "$0" atualizar; pausar ;;
+      6) "$0" desinstalar; pausar ;;
+      0|"") return ;;
+      *) echo "   ${RED}Opção inválida.${NC}"; sleep 1 ;;
+    esac
+  done
+}
+
+menu_principal() {
+  [[ -n "$TTY_IN" ]] || die "O menu precisa de um terminal interativo. Use 'painel ajuda' para ver os comandos."
+  while true; do
+    cabecalho
+    pycli resumo 2>/dev/null || true
+    echo "     ${GREEN}1${NC}  Contas SSH"
+    echo "     ${GREEN}2${NC}  Serviço e configurações"
+    echo "     ${GREEN}3${NC}  Manutenção"
+    echo
+    echo "     ${YELLOW}0${NC}  Sair"
+    echo "  ──────────────────────────────────────────────────"
+    ask op "   Opção: " ""
+    case "$op" in
+      1) menu_contas ;;
+      2) menu_servico ;;
+      3) menu_manutencao ;;
+      0|"") clear 2>/dev/null || true; exit 0 ;;
+      *) echo "   ${RED}Opção inválida.${NC}"; sleep 1 ;;
+    esac
+  done
+}
+
 case "${1:-menu}" in
+  menu|"")
+    need_root
+    menu_principal
+    ;;
   status)
     systemctl status "$SERVICE" --no-pager || true
     ;;
@@ -280,7 +472,7 @@ EOF
     if [[ "${d,,}" == "s" ]]; then rm -rf "$INSTALL_DIR"; else rm -rf "${INSTALL_DIR}/app" "${INSTALL_DIR}/.venv"; fi
     ok "Painel removido."
     ;;
-  info|menu|"")
+  info|ajuda|help)
     port="$(panel_port)"
     ip="$(curl -s --max-time 4 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')"
     estado="$(systemctl is-active "$SERVICE" 2>/dev/null)" || true
@@ -296,6 +488,7 @@ EOF
     echo "  Estado:  ${estado}"
     echo "  Acesso:  http://${ip}:${port}"
     echo
+    echo "  ${BOLD}painel${NC}                 abre o MENU interativo"
     echo "  ${BOLD}painel${NC} status | start | stop | restart"
     echo "  ${BOLD}painel${NC} logs            acompanhar o log"
     echo "  ${BOLD}painel${NC} porta <numero>  trocar a porta"

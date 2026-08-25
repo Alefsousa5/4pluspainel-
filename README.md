@@ -113,6 +113,39 @@ mascaradas. É o arquivo mais útil para descobrir o que está errado.
 | Cliente não conecta no SSH (`Permission denied`) | Confirme que a senha está liberada: `sshd -T \| grep -i passwordauth` deve responder `yes`. O instalador ajusta isso, mas um painel de provedor pode sobrescrever. |
 | Painel mostra host errado nos dados do cliente | Rode com `PANEL_PUBLIC_HOST=seu.ip.ou.dominio` ou edite `Environment=PANEL_PUBLIC_HOST=` em `/etc/systemd/system/4pluspainel.service` e rode `painel restart`. |
 
+## Menu no terminal da VPS
+
+Digite `painel` (como root) para abrir o menu interativo:
+
+```
+  ╔════════════════════════════════════════════════╗
+  ║              4 P L U S   P A I N E L           ║
+  ╚════════════════════════════════════════════════╝
+   Painel: http://SEU_IP:8080   Serviço: ativo
+  ──────────────────────────────────────────────────
+
+  Contas: 12   Online: 3   Vencendo: 1   Expiradas: 0
+  Servidor: CPU 4%  RAM 31%  Disco 22%  Uptime 6d 4h
+  SSH: SEU_IP porta 22
+
+     1  Contas SSH
+     2  Serviço e configurações
+     3  Manutenção
+
+     0  Sair
+```
+
+- **Contas SSH** — listar, criar, remover, renovar, bloquear/desbloquear,
+  derrubar sessões e ver quem está online. Ao criar, mostra os dados prontos
+  para enviar ao cliente (host, porta, usuário, senha e validade).
+- **Serviço e configurações** — status, reiniciar/parar/iniciar, trocar porta,
+  trocar a senha do administrador, ver os dados de acesso e acompanhar o log.
+- **Manutenção** — diagnóstico, reparar o ambiente Python, gerar relatório de
+  suporte, backup, atualizar e desinstalar.
+
+O menu usa as mesmas regras da interface web: uma conta criada no terminal
+aparece no navegador e vice-versa.
+
 ## Comando `painel`
 
 | Comando | O que faz |
