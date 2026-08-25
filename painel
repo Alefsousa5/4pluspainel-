@@ -533,6 +533,8 @@ EOF
     echo "  ─────────────────────────────────"
     echo "  Estado:  ${estado}"
     echo "  Acesso:  http://${ip}:${port}"
+    origem_git="$(git -C "$INSTALL_DIR" remote get-url origin 2>/dev/null)"
+    echo "  Origem:  ${origem_git:-instalação sem vínculo com o git}"
     echo
     echo "  ${BOLD}painel${NC}                 abre o MENU interativo"
     echo "  ${BOLD}painel${NC} status | start | stop | restart"

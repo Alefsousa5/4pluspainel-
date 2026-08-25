@@ -14,16 +14,33 @@ INSTALL_DIR="/opt/4pluspainel"
 DATA_DIR="${INSTALL_DIR}/data"
 SERVICE="4pluspainel"
 # --------------------------------------------------------------------------- #
-# GitHub — origem do código
+# GITHUB — REPOSITÓRIO DE ORIGEM DO PAINEL
 # --------------------------------------------------------------------------- #
-# Repositório de onde o painel é baixado e atualizado. Pode ser trocado por um
-# fork sem editar o script:  sudo GITHUB_REPO=usuario/repo bash install.sh
+#
+#   Repositório : https://github.com/Alefsousa5/4pluspainel-
+#   Clone (git) : https://github.com/Alefsousa5/4pluspainel-.git
+#
+# É daqui que o painel é baixado na instalação e atualizado depois
+# (sudo painel atualizar).
+#
+# Para usar OUTRO repositório (por exemplo o seu fork), edite a linha
+# GITHUB_REPO abaixo ou passe por variável, sem precisar alterar o script:
+#
+#   sudo GITHUB_REPO=seuusuario/seurepo bash install.sh
+#   sudo GITHUB_TOKEN=ghp_seutoken     bash install.sh   # repositório privado
+#
+# --------------------------------------------------------------------------- #
+
+# >>> Repositório do painel no GitHub (usuário/repositório) <<<
 GITHUB_REPO="${GITHUB_REPO:-Alefsousa5/4pluspainel-}"
+
+# Host do GitHub (mude apenas se usar GitHub Enterprise).
 GITHUB_HOST="${GITHUB_HOST:-github.com}"
 
 # Token opcional, apenas para repositório privado (nunca é gravado em disco).
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 
+# URL final usada pelo git. Ex.: https://github.com/Alefsousa5/4pluspainel-.git
 if [[ -n "${REPO_URL:-}" ]]; then
   : # URL completa informada manualmente tem prioridade
 elif [[ -n "$GITHUB_TOKEN" ]]; then
@@ -79,6 +96,8 @@ banner() {
   echo "   ║      Gerenciador de contas SSH v1.0      ║"
   echo "   ╚══════════════════════════════════════════╝"
   echo "${NC}"
+  echo "   Repositório: ${BOLD}https://${GITHUB_HOST}/${GITHUB_REPO}${NC}"
+  echo
 }
 
 # --------------------------------------------------------------------------- #
@@ -735,6 +754,9 @@ finish() {
   echo
   echo "   ${YELLOW}Anote a senha. Se precisar, ela também fica guardada em${NC}"
   echo "   ${YELLOW}${INSTALL_DIR}/acesso.txt — veja com: sudo painel acesso${NC}"
+  echo
+  echo "   ${BOLD}Origem do código:${NC} https://${GITHUB_HOST}/${GITHUB_REPO}"
+  echo "   (atualize depois com: sudo painel atualizar)"
   echo
   echo "   Comandos úteis:"
   echo "     painel status      — situação do serviço"
