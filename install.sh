@@ -410,10 +410,24 @@ EOF
 
 create_service() {
   info "Criando serviço systemd..."
+
+  # Em Debian/Ubuntu a unidade do SSH chama-se ssh.service; em RHEL/CentOS,
+  # sshd.service. Declarar uma que não existe faz o systemd ignorar a ordem.
+  local ssh_unit="ssh.service"
+  if systemctl list-unit-files 2>/dev/null | grep -q '^sshd\.service'; then
+    ssh_unit="sshd.service"
+  fi
+
   cat > "/etc/systemd/system/${SERVICE}.service" <<EOF
 [Unit]
 Description=${APP_NAME} — gerenciador de contas SSH
-After=network.target sshd.service
+Documentation=https://github.com/Alefsousa5/4pluspainel-
+# network-online garante IP configurado antes de abrir a porta no boot.
+Wants=network-online.target
+After=network-online.target ${ssh_unit}
+# Sem limite de tentativas: uma VPS pode demorar a liberar a porta ou a rede,
+# e o padrão (5 tentativas em 10s) deixaria o painel morto após um reboot.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -424,23 +438,58 @@ Environment=PANEL_PORT=${PORT}
 Environment=PANEL_PUBLIC_HOST=${PUBLIC_HOST}
 Environment=PYTHONUNBUFFERED=1
 ExecStart=${INSTALL_DIR}/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT}
+
 Restart=always
 RestartSec=5
+
+# Encerramento limpo: o uvicorn finaliza as requisições em andamento.
+KillSignal=SIGINT
+TimeoutStopSec=20
+
+# Endurecimento leve. Nada que impeça useradd/userdel/chpasswd: o painel
+# gerencia contas do sistema e precisa enxergar /home e /etc normalmente.
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
   systemctl daemon-reload
-  systemctl enable "$SERVICE" -q
+  systemctl enable "$SERVICE" -q 2>/dev/null || warn "Não foi possível habilitar o serviço no boot."
+  systemctl reset-failed "$SERVICE" 2>/dev/null || true
   systemctl restart "$SERVICE"
-  sleep 3
 
-  if systemctl is-active --quiet "$SERVICE"; then
-    ok "Serviço ativo."
+  # Aguarda o serviço responder de fato, em vez de confiar num sleep fixo.
+  local i state
+  for i in $(seq 1 20); do
+    state="$(systemctl is-active "$SERVICE" 2>/dev/null || true)"
+    [[ "$state" == "active" ]] && break
+    [[ "$state" == "failed" ]] && break
+    sleep 1
+  done
+
+  if [[ "$(systemctl is-active "$SERVICE" 2>/dev/null || true)" != "active" ]]; then
+    warn "O serviço não iniciou. Últimas linhas do log:"
+    journalctl -u "$SERVICE" -n 25 --no-pager 2>/dev/null | sed 's/^/      /' >&2 || true
+    die "Falha ao iniciar o serviço. Rode 'painel doctor' para diagnosticar."
+  fi
+
+  # Confirma que a porta está realmente aceitando conexões.
+  local ok_http=""
+  for i in $(seq 1 15); do
+    if curl -fsS --max-time 2 "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
+      ok_http="1"; break
+    fi
+    sleep 1
+  done
+
+  if [[ -n "$ok_http" ]]; then
+    ok "Serviço ativo e respondendo na porta ${PORT}."
   else
-    journalctl -u "$SERVICE" -n 20 --no-pager || true
-    die "O serviço não iniciou. Veja o log acima."
+    warn "O serviço subiu, mas não respondeu em http://127.0.0.1:${PORT}/health"
+    warn "Verifique com: painel logs"
   fi
 }
 

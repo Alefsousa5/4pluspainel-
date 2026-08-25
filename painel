@@ -99,7 +99,38 @@ PY
       || echo "  ${YELLOW}[!]${NC} Banco ainda não criado (normal antes do primeiro acesso)."
 
     svc_state="$(systemctl is-active "$SERVICE" 2>/dev/null)" || true
-    echo "  Serviço: ${svc_state:-não instalado}"
+    nrest="$(systemctl show "$SERVICE" -p NRestarts --value 2>/dev/null)" || true
+    case "$svc_state" in
+      active)
+        echo "  [OK] Serviço ativo (reinícios: ${nrest:-0})"
+        ;;
+      activating)
+        echo "  ${RED}[X]${NC} Serviço em loop de reinício (${nrest:-?} tentativas)."
+        echo "       O painel está caindo logo após iniciar. Causa provável:"
+        causa="$(journalctl -u "$SERVICE" -n 60 --no-pager 2>/dev/null \
+                 | grep -iE "error|address already in use|no module|traceback|permission denied" \
+                 | tail -3)"
+        if [[ -n "$causa" ]]; then
+          echo "$causa" | sed 's/^.*]: /       /'
+        else
+          echo "       (não identificada — veja 'painel logs')"
+        fi
+        echo "       Veja tudo com: painel logs"
+        ;;
+      failed)
+        echo "  ${RED}[X]${NC} Serviço falhou. Veja: painel logs"
+        ;;
+      *)
+        echo "  ${YELLOW}[!]${NC} Serviço: ${svc_state:-não instalado}"
+        ;;
+    esac
+
+    port="$(panel_port)"
+    if curl -fsS --max-time 3 "http://127.0.0.1:${port}/health" >/dev/null 2>&1; then
+      echo "  [OK] Respondendo em http://127.0.0.1:${port}"
+    else
+      echo "  ${YELLOW}[!]${NC} Não respondeu na porta ${port}."
+    fi
     echo "  Porta:   $(panel_port)"
     echo
     ;;

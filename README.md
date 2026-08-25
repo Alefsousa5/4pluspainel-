@@ -85,7 +85,8 @@ sudo PANEL_PUBLIC_HOST=vpn.seudominio.com bash install.sh
 | `Execute como root` | Rode com `sudo bash install.sh`. |
 | `A branch 'main' não contém o painel` | Normal — o instalador avisa e tenta a próxima branch sozinho. |
 | Não abre no navegador | Libere a porta no firewall do provedor (Oracle/AWS/Contabo têm firewall próprio, fora do UFW). Confira com `painel status`. |
-| Serviço não sobe | Veja o erro real com `painel logs` ou `journalctl -u 4pluspainel -n 50`. |
+| Serviço não sobe | Rode `sudo painel doctor`: ele aponta a causa (porta ocupada, módulo faltando etc.). O log completo fica em `painel logs`. |
+| Serviço fica reiniciando sem parar | `painel doctor` mostra o motivo. O serviço não desiste: assim que a causa for resolvida, ele volta sozinho. |
 | `ensurepip is not available` | Falta o pacote venv do Python. O instalador tenta resolver sozinho; se não conseguir: `apt install -y python3-venv` (ou `python3.8-venv`, conforme a versão). |
 | `Falha ao instalar as dependências Python` | Geralmente é falta de acesso ao pypi.org. O instalador agora mostra o erro real do pip. Para recriar o ambiente: `sudo painel reparar`. |
 | Painel parou depois de uma atualização | `sudo painel doctor` aponta o que quebrou e `sudo painel reparar` refaz o ambiente Python. |
@@ -167,6 +168,21 @@ Dados ficam em `/opt/4pluspainel/data/painel.db`.
   reexibi-las ao revendedor. Mantenha o acesso ao servidor restrito.
 - O painel roda como root (precisa disso para gerenciar usuários do sistema).
   Recomenda-se colocá-lo atrás de um proxy com HTTPS se for exposto à internet.
+
+## O serviço systemd
+
+O painel roda como o serviço `4pluspainel`, iniciado automaticamente no boot:
+
+- espera a rede estar pronta (`network-online.target`) antes de abrir a porta;
+- reinicia sozinho se cair, **sem limite de tentativas** — se a porta estiver
+  ocupada ou a rede demorar após um reboot, ele continua tentando até subir;
+- para de forma limpa com `SIGINT`, deixando o uvicorn finalizar as
+  requisições em andamento (parada em menos de 1s, sem risco para o banco).
+
+```bash
+sudo systemctl status 4pluspainel     # ou: painel status
+sudo journalctl -u 4pluspainel -f     # ou: painel logs
+```
 
 ## Compatibilidade
 
