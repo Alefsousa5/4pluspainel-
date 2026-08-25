@@ -13,6 +13,25 @@ die()  { echo "${RED}[x]${NC} $*" >&2; exit 1; }
 
 need_root() { [[ $EUID -eq 0 ]] || die "Execute como root (sudo painel $*)"; }
 
+# Leitura que nao aborta quando nao ha terminal (script rodado via pipe/cron).
+TTY_IN=""
+if [[ -t 0 ]]; then TTY_IN="/dev/stdin"
+elif [[ -r /dev/tty ]] && : 2>/dev/null >/dev/tty; then TTY_IN="/dev/tty"; fi
+
+ask() {  # ask <var> <prompt> <padrao>
+  local __v="$1" __p="$2" __d="$3" __r=""
+  if [[ -z "$TTY_IN" ]]; then printf -v "$__v" '%s' "$__d"; return 0; fi
+  read -rp "$__p" __r <"$TTY_IN" || __r=""
+  printf -v "$__v" '%s' "${__r:-$__d}"
+}
+ask_secret() {  # ask_secret <var> <prompt>
+  local __v="$1" __p="$2" __r=""
+  if [[ -z "$TTY_IN" ]]; then printf -v "$__v" '%s' ""; return 0; fi
+  read -rsp "$__p" __r <"$TTY_IN" || __r=""
+  echo
+  printf -v "$__v" '%s' "$__r"
+}
+
 panel_port() {
   grep -oP 'PANEL_PORT=\K[0-9]+' "/etc/systemd/system/${SERVICE}.service" 2>/dev/null || echo 8080
 }
@@ -45,8 +64,9 @@ case "${1:-menu}" in
     ;;
   senha)
     need_root
-    read -rp "Usuário do painel [admin]: " u; u="${u:-admin}"
-    read -rsp "Nova senha: " p; echo
+    [[ -n "$TTY_IN" ]] || die "Este comando precisa de um terminal interativo."
+    ask u "Usuário do painel [admin]: " "admin"
+    ask_secret p "Nova senha: "
     [[ ${#p} -ge 4 ]] || die "A senha precisa ter ao menos 4 caracteres."
     PANEL_DATA_DIR="$DATA_DIR" "${INSTALL_DIR}/.venv/bin/python" - "$INSTALL_DIR" "$u" "$p" <<'PY'
 import sys
@@ -167,12 +187,12 @@ PY
     ;;
   desinstalar|uninstall)
     need_root
-    read -rp "${YELLOW}Remover o painel? As contas SSH no sistema NÃO são apagadas. [s/N]: ${NC}" c
-    [[ "${c,,}" == "s" ]] || exit 0
+    ask c "${YELLOW}Remover o painel? As contas SSH no sistema NÃO são apagadas. [s/N]: ${NC}" "n"
+    [[ "${c,,}" == "s" ]] || { echo "Cancelado."; exit 0; }
     systemctl disable --now "$SERVICE" 2>/dev/null || true
     rm -f "/etc/systemd/system/${SERVICE}.service" /usr/local/bin/painel
     systemctl daemon-reload
-    read -rp "Apagar também os dados (${DATA_DIR})? [s/N]: " d
+    ask d "Apagar também os dados (${DATA_DIR})? [s/N]: " "n"
     if [[ "${d,,}" == "s" ]]; then rm -rf "$INSTALL_DIR"; else rm -rf "${INSTALL_DIR}/app" "${INSTALL_DIR}/.venv"; fi
     ok "Painel removido."
     ;;

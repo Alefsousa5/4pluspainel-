@@ -90,28 +90,75 @@ gen_password() {
   head -c 400 /dev/urandom | tr -dc 'a-z0-9' | cut -c1-12
 }
 
+# Existe um terminal para perguntar ao usuário?
+# Com 'bash <(curl ...)' ou 'curl ... | bash' o stdin NÃO é um terminal: ler
+# dele retorna EOF na hora. Nesse caso as perguntas são feitas em /dev/tty,
+# e se nem isso existir a instalação segue com os valores padrão.
+TTY_IN=""
+detect_tty() {
+  if [[ -t 0 ]]; then
+    TTY_IN="/dev/stdin"
+  elif [[ -r /dev/tty ]] && : 2>/dev/null >/dev/tty; then
+    TTY_IN="/dev/tty"
+  else
+    TTY_IN=""
+  fi
+}
+
+# ask <variável> <pergunta> <padrão>
+# Nunca aborta: sem terminal, assume o padrão.
+ask() {
+  local __var="$1" __prompt="$2" __default="$3" __reply=""
+  if [[ -z "$TTY_IN" ]]; then
+    printf -v "$__var" '%s' "$__default"
+    return 0
+  fi
+  read -rp "$__prompt" __reply <"$TTY_IN" || __reply=""
+  printf -v "$__var" '%s' "${__reply:-$__default}"
+}
+
+# ask_secret <variável> <pergunta>  (não ecoa o que é digitado)
+ask_secret() {
+  local __var="$1" __prompt="$2" __reply=""
+  if [[ -z "$TTY_IN" ]]; then
+    printf -v "$__var" '%s' ""
+    return 0
+  fi
+  read -rsp "$__prompt" __reply <"$TTY_IN" || __reply=""
+  echo
+  printf -v "$__var" '%s' "$__reply"
+}
+
 ask_config() {
-  if [[ -n "${PANEL_UNATTENDED:-}" ]]; then
+  detect_tty
+
+  if [[ -n "${PANEL_UNATTENDED:-}" || -z "$TTY_IN" ]]; then
     PORT="${PANEL_PORT:-$DEFAULT_PORT}"
     ADMIN_USER="${PANEL_ADMIN:-admin}"
     ADMIN_PASS="${PANEL_ADMIN_PASS:-$(gen_password)}"
-    info "Instalação silenciosa: porta ${PORT}, admin ${ADMIN_USER}"
+    if [[ -z "$TTY_IN" && -z "${PANEL_UNATTENDED:-}" ]]; then
+      info "Sem terminal interativo — usando os valores padrão."
+      info "Para escolher porta e senha, baixe o script e rode:"
+      info "  curl -sSLO <url>/install.sh && sudo bash install.sh"
+    else
+      info "Instalação silenciosa: porta ${PORT}, admin ${ADMIN_USER}"
+    fi
     return
   fi
 
-  read -rp "$(echo "${BOLD}Porta do painel${NC} [${DEFAULT_PORT}]: ")" PORT
-  PORT="${PORT:-$DEFAULT_PORT}"
-  [[ "$PORT" =~ ^[0-9]+$ ]] && (( PORT >= 1 && PORT <= 65535 )) || die "Porta inválida: $PORT"
+  ask PORT "$(printf '%sPorta do painel%s [%s]: ' "$BOLD" "$NC" "$DEFAULT_PORT")" "$DEFAULT_PORT"
+  if ! [[ "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
+    die "Porta inválida: ${PORT}"
+  fi
   if port_in_use "$PORT"; then
     warn "A porta ${PORT} já está em uso — o serviço pode não subir."
-    read -rp "Continuar mesmo assim? [s/N]: " go
+    ask go "Continuar mesmo assim? [s/N]: " "n"
     [[ "${go,,}" == "s" ]] || die "Instalação cancelada."
   fi
 
-  read -rp "$(echo "${BOLD}Usuário administrador${NC} [admin]: ")" ADMIN_USER
-  ADMIN_USER="${ADMIN_USER:-admin}"
+  ask ADMIN_USER "$(printf '%sUsuário administrador%s [admin]: ' "$BOLD" "$NC")" "admin"
 
-  read -rsp "$(echo "${BOLD}Senha do administrador${NC} (enter = gerar): ")" ADMIN_PASS; echo
+  ask_secret ADMIN_PASS "$(printf '%sSenha do administrador%s (enter = gerar): ' "$BOLD" "$NC")"
   if [[ -z "$ADMIN_PASS" ]]; then
     ADMIN_PASS="$(gen_password)"
     info "Senha gerada automaticamente."
