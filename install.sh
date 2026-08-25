@@ -13,7 +13,25 @@ APP_USER="4pluspainel"
 INSTALL_DIR="/opt/4pluspainel"
 DATA_DIR="${INSTALL_DIR}/data"
 SERVICE="4pluspainel"
-REPO_URL="${REPO_URL:-https://github.com/Alefsousa5/4pluspainel-.git}"
+# --------------------------------------------------------------------------- #
+# GitHub — origem do código
+# --------------------------------------------------------------------------- #
+# Repositório de onde o painel é baixado e atualizado. Pode ser trocado por um
+# fork sem editar o script:  sudo GITHUB_REPO=usuario/repo bash install.sh
+GITHUB_REPO="${GITHUB_REPO:-Alefsousa5/4pluspainel-}"
+GITHUB_HOST="${GITHUB_HOST:-github.com}"
+
+# Token opcional, apenas para repositório privado (nunca é gravado em disco).
+GITHUB_TOKEN="${GITHUB_TOKEN:-}"
+
+if [[ -n "${REPO_URL:-}" ]]; then
+  : # URL completa informada manualmente tem prioridade
+elif [[ -n "$GITHUB_TOKEN" ]]; then
+  REPO_URL="https://${GITHUB_TOKEN}@${GITHUB_HOST}/${GITHUB_REPO}.git"
+else
+  REPO_URL="https://${GITHUB_HOST}/${GITHUB_REPO}.git"
+fi
+
 # Branches tentadas em ordem, caso REPO_BRANCH não seja informada.
 REPO_BRANCH="${REPO_BRANCH:-}"
 FALLBACK_BRANCHES=("main" "arena/01a038fb-4pluspainel" "master")
@@ -205,9 +223,51 @@ install_packages() {
   ok "Dependências instaladas."
 }
 
+# Confere o acesso ao GitHub antes de tentar baixar, para separar um problema
+# de rede/credencial de um problema do próprio painel.
+check_github() {
+  local mostrar="${REPO_URL/${GITHUB_TOKEN}@/***@}"
+  info "Verificando acesso ao GitHub (${GITHUB_REPO})..."
+
+  if ! command -v git >/dev/null 2>&1; then
+    die "git não está instalado. Instale com: apt install -y git"
+  fi
+
+  # git ls-remote resolve autenticação, DNS e TLS de uma vez só.
+  # Obs.: sob 'set -e' uma atribuição que falha aborta a função antes de
+  # chegar no 'rc=$?'. O '|| true' garante que o erro seja tratado aqui.
+  local saida rc
+  saida="$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads "$REPO_URL" 2>&1)" && rc=0 || rc=$?
+  if (( rc == 0 )); then
+    local n; n="$(echo "$saida" | grep -c 'refs/heads/' || true)"
+    ok "GitHub acessível — ${n} branch(es) encontrada(s)."
+    return 0
+  fi
+
+  echo "$saida" | sed 's/^/      /' >&2
+  case "$saida" in
+    *"Authentication failed"*|*"could not read Username"*|*"Invalid username"*)
+      die "Falha de autenticação no GitHub.
+      Se o repositório for privado, informe um token:
+        sudo GITHUB_TOKEN=ghp_seutoken bash install.sh" ;;
+    *"not found"*|*"Repository not found"*)
+      die "Repositório '${GITHUB_REPO}' não encontrado.
+      Confira o nome ou use o seu fork:
+        sudo GITHUB_REPO=seuusuario/seurepo bash install.sh" ;;
+    *"Could not resolve host"*|*"unable to access"*|*"timed out"*)
+      die "Sem conexão com o GitHub (${GITHUB_HOST}).
+      Teste na VPS:  curl -I https://${GITHUB_HOST}
+      Verifique DNS, firewall de saída ou proxy do provedor." ;;
+    *)
+      die "Não foi possível acessar ${mostrar}" ;;
+  esac
+}
+
 # Baixa o painel testando as branches candidatas até achar uma que
 # realmente contenha o código (evita instalar um repositório só com README).
 clone_repo() {
+  check_github
+
   local candidates=()
   if [[ -n "$REPO_BRANCH" ]]; then
     candidates=("$REPO_BRANCH")
@@ -252,6 +312,11 @@ clone_repo() {
         rm -rf "$DATA_DIR"
         mv "${tmp}/data_backup" "$DATA_DIR"
         ok "Dados anteriores restaurados."
+      fi
+      # Nunca deixa o token gravado no .git/config da instalação.
+      if [[ -n "$GITHUB_TOKEN" ]]; then
+        git -C "$INSTALL_DIR" remote set-url origin \
+          "https://${GITHUB_HOST}/${GITHUB_REPO}.git" 2>/dev/null || true
       fi
       ok "Código obtido da branch '${br}'."
       return 0

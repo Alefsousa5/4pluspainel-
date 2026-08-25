@@ -56,6 +56,39 @@ depois:
 
 Ao final ele mostra o endereço de acesso e as credenciais.
 
+### GitHub
+
+O painel é baixado e atualizado direto do GitHub. Antes de baixar, o
+instalador testa o acesso ao repositório e explica o que fazer se falhar
+(sem rede, repositório inexistente ou privado).
+
+| Variável | Para que serve |
+|---|---|
+| `GITHUB_REPO` | usar outro repositório ou o seu fork (padrão `Alefsousa5/4pluspainel-`) |
+| `GITHUB_TOKEN` | token de acesso, apenas se o repositório for privado |
+| `REPO_BRANCH` | branch específica (por padrão ele procura sozinho) |
+
+```bash
+# instalar a partir do seu fork
+sudo GITHUB_REPO=seuusuario/seurepo bash install.sh
+
+# repositório privado
+sudo GITHUB_TOKEN=ghp_seutoken bash install.sh
+```
+
+O token é usado só durante a execução — ele **não** fica gravado no
+`.git/config` da instalação.
+
+Para atualizar depois, puxando do GitHub:
+
+```bash
+sudo painel atualizar
+```
+
+Ele mostra a origem e a branch, lista os commits novos, faz backup do banco
+antes de aplicar e confirma que o serviço voltou. Se já estiver na última
+versão, avisa e não mexe em nada.
+
 ### Instalação silenciosa
 
 ```bash

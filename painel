@@ -456,10 +456,56 @@ EOF
   atualizar|update)
     need_root
     [[ -d "${INSTALL_DIR}/.git" ]] || die "Instalação não veio do git; reinstale com install.sh."
-    git -C "$INSTALL_DIR" pull -q
-    "${INSTALL_DIR}/.venv/bin/python" -m pip install -q -r "${INSTALL_DIR}/requirements.txt"
+
+    origem="$(git -C "$INSTALL_DIR" remote get-url origin 2>/dev/null)"
+    branch="$(git -C "$INSTALL_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+    info "Origem: ${origem}"
+    info "Branch: ${branch}"
+
+    # Token opcional para repositório privado (usado só nesta execução).
+    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+      origem_auth="${origem/https:\/\//https://${GITHUB_TOKEN}@}"
+    else
+      origem_auth="$origem"
+    fi
+
+    if ! GIT_TERMINAL_PROMPT=0 git -C "$INSTALL_DIR" fetch -q "$origem_auth" "$branch" 2>/tmp/painel_fetch.err; then
+      sed 's/^/      /' /tmp/painel_fetch.err >&2 || true
+      die "Não foi possível acessar o GitHub. Se o repositório for privado:
+      sudo GITHUB_TOKEN=ghp_seutoken painel atualizar"
+    fi
+
+    atual="$(git -C "$INSTALL_DIR" rev-parse HEAD)"
+    novo="$(git -C "$INSTALL_DIR" rev-parse FETCH_HEAD)"
+    if [[ "$atual" == "$novo" ]]; then
+      ok "O painel já está na versão mais recente."
+      exit 0
+    fi
+
+    echo "  Novidades:"
+    git -C "$INSTALL_DIR" log --oneline "${atual}..${novo}" 2>/dev/null | head -10 | sed 's/^/    /'
+
+    # Backup do banco antes de mexer em qualquer coisa.
+    if [[ -f "${DATA_DIR}/painel.db" ]]; then
+      cp "${DATA_DIR}/painel.db" "${DATA_DIR}/painel.db.bak" 2>/dev/null || true
+      info "Backup do banco salvo em ${DATA_DIR}/painel.db.bak"
+    fi
+
+    git -C "$INSTALL_DIR" reset --hard "$novo" -q
+    "${INSTALL_DIR}/.venv/bin/python" -m pip install -q -r "${INSTALL_DIR}/requirements.txt" \
+      || die "Falha ao atualizar as dependências. Rode: sudo painel reparar"
+
+    # Reinstala os comandos, caso tenham mudado.
+    [[ -f "${INSTALL_DIR}/painel" ]] && install -m 755 "${INSTALL_DIR}/painel" /usr/local/bin/painel
+    [[ -f "${INSTALL_DIR}/diagnostico.sh" ]] && install -m 755 "${INSTALL_DIR}/diagnostico.sh" /usr/local/bin/painel-diagnostico
+
     systemctl restart "$SERVICE"
-    ok "Painel atualizado."
+    sleep 3
+    if systemctl is-active --quiet "$SERVICE"; then
+      ok "Painel atualizado e rodando."
+    else
+      die "O serviço não subiu após a atualização. Rode: sudo painel doctor"
+    fi
     ;;
   desinstalar|uninstall)
     need_root

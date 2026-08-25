@@ -132,6 +132,32 @@ testa_url() {
 testa_url "GitHub"  "https://github.com"     "sem isso o git clone falha"
 testa_url "PyPI"    "https://pypi.org/simple/" "sem isso o pip não instala as dependências"
 
+# Testa o repositório de verdade, não apenas o site do GitHub.
+GITHUB_REPO="${GITHUB_REPO:-Alefsousa5/4pluspainel-}"
+REPO_TESTE="https://github.com/${GITHUB_REPO}.git"
+[[ -n "${GITHUB_TOKEN:-}" ]] && REPO_TESTE="https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git"
+
+if command -v git >/dev/null 2>&1; then
+  saida_git="$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads "$REPO_TESTE" 2>&1)"
+  if [[ $? -eq 0 ]]; then
+    nb="$(echo "$saida_git" | grep -c 'refs/heads/')"
+    ok "Repositório ${GITHUB_REPO} acessível (${nb} branch(es))."
+    if echo "$saida_git" | grep -q 'refs/heads/main'; then
+      echo "         branches: $(echo "$saida_git" | sed 's#.*refs/heads/##' | tr '\n' ' ')"
+    fi
+  else
+    case "$saida_git" in
+      *"Authentication"*|*"could not read Username"*)
+        falha "Repositório privado. Use: sudo GITHUB_TOKEN=ghp_seutoken bash install.sh" ;;
+      *"not found"*)
+        falha "Repositório '${GITHUB_REPO}' não encontrado. Confira o nome." ;;
+      *)
+        falha "Não foi possível acessar ${GITHUB_REPO}:"
+        echo "$saida_git" | head -3 | sed 's/^/          /' ;;
+    esac
+  fi
+fi
+
 if apt-get update -qq >/dev/null 2>&1; then
   ok "Repositórios apt respondendo."
 else
